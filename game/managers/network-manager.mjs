@@ -53,11 +53,6 @@ class NetworkManager extends pc.EventHandler {
         case 'animation-update':
           this.handleAnimationUpdate(message);
           break;
-        case 'game-started':
-          // TODO: remove
-          console.log('🐹 Received message:', message.type);
-          this.handleOnGameStart(message.payload?.roomId);
-          break;
         default:
           console.warn('🐹 Unknown message type:', type);
       }
@@ -158,20 +153,10 @@ class NetworkManager extends pc.EventHandler {
 
   async startGame() {
     await this.matchmaking.startGame();
-    this.sendMessage('game-started', { roomId: this.currentRoom.id }); // TODO: remove
-    this.sendMessage('game-started', { roomId: this.currentRoom.id }); // TODO: remove
-    this.fire('receive-message', {
-      type: 'game-started',
-      payload: {
-        roomId: this.currentRoom.id,
-      },
-    });
   }
 
   async handleOnGameStart(roomId) {
     if (!this.currentRoom) return;
-    if (this.currentRoom.id !== roomId) return; // TODO: remove
-
     await this.leaveChannel();
     await this.enterChannel(this.currentRoom.id);
     console.log('🐯 Matchmaking game started, re-entered channel:', this.currentRoom.id);
@@ -179,7 +164,7 @@ class NetworkManager extends pc.EventHandler {
 
   handleRoomListUpdated(rooms) {
     const isInLobby = this.matchmaking.currentClient?.isInLobby();
-    const isInGameUnStartedRoom = this.currentRoom && !this.currentRoom?.is_closed;
+    const isInGameUnStartedRoom = this.currentRoom && !this.currentRoom?.is_closed && !this.currentRoom?.is_game_started;
     // const isInGameUnStartedRoom = this.currentRoom && !this.currentRoom?.is_game_started;
 
     // The player is in the lobby or an room which game is not started yet,
@@ -188,7 +173,7 @@ class NetworkManager extends pc.EventHandler {
       const ids = [];
       rooms.forEach((room) => {
         // if (room.is_game_started) { TODO: revise
-        if (room.is_closed) {
+        if (room.is_closed || room.is_game_started) {
           room.actors.forEach((actor) => {
             ids.push(actor.session_id);
           });

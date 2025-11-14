@@ -61,7 +61,7 @@ class MatchmakingClient {
 
     const client = await ViverseSdkClient.instance.newMatchmakingClient(
       this.appId,
-      this.debug
+      true
     );
     this.currentClient = client;
     console.log("🐯 Matchmaking client created:", client);
@@ -116,8 +116,7 @@ class MatchmakingClient {
       console.warn("Only the room creator can close the room.");
       return;
     }
-
-    return this.currentClient.closeRoom(); // TODO: remove, use startGame() instead
+    return this.currentClient.startGame();
   }
 
   leaveRoom() {

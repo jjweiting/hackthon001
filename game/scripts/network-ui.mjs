@@ -384,7 +384,7 @@ export class NetworkUI extends pc.Script {
       return;
     }
 
-    const openRooms = rooms.filter((room) => !room.is_closed);
+    const openRooms = rooms.filter((room) => !room.is_closed && !room.is_game_started);
     const currentRoom = this.networkManager?.currentRoom;
     const isInRoom = !!currentRoom;
 
