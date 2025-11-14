@@ -953,6 +953,14 @@ class SeededRandom {
 
 > `BattleHud` 每 frame 會從 `BattleGameManager` 讀取當前血量、分數和時間，並更新 UI。
 
+為了讓遊戲開始時自動切換 UI，建議：
+
+- 將 `BattleHUD` 這個 UI 根節點加上 Tag：`battle-ui`（或 `battle-hud-root`）。
+- 預設將 `BattleHUD.enabled = false`（在 Editor 中關閉）。
+- `NetworkUI`（`game/scripts/network-ui.mjs`）在收到 `game-start` 事件時會：
+  - 隱藏 Matchmaking 面板與切換按鈕。
+  - 啟用帶有 `battle-ui` / `battle-hud-root` Tag 的 Entity，顯示戰鬥 HUD。
+
 ---
 
 ## 3. Player Combat System

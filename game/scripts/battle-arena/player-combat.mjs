@@ -44,7 +44,7 @@ export class PlayerCombat extends Script {
     const localPlayer = this.battleManager.localPlayer;
     if (!localPlayer || !localPlayer.isAlive) return;
 
-    const now = this.app.clock.now();
+    const now = this.app.time; // time in seconds since app start
     const weaponConfig = this.weaponSystem.getWeaponConfig(localPlayer.currentWeapon);
     const fireInterval = weaponConfig.fireRate;
 

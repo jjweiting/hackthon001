@@ -32,6 +32,11 @@ export class NetworkUI extends pc.Script {
     this.createToggleButton();
     this.createUI();
     this.addEventListeners();
+
+    if (this.networkManager) {
+      // 當 Matchmaking 通知遊戲開始時，關閉配對面板並顯示戰鬥 UI
+      this.networkManager.on("game-start", this.onGameStart, this);
+    }
   }
 
   createUI() {
@@ -526,11 +531,42 @@ App ID: ${this.networkManager.appId}
   }
 
   destroy() {
+    if (this.networkManager) {
+      this.networkManager.off("game-start", this.onGameStart, this);
+    }
+
     if (this.uiContainer && this.uiContainer.parentNode) {
       this.uiContainer.parentNode.removeChild(this.uiContainer);
     }
     if (this.toggleButton && this.toggleButton.parentNode) {
       this.toggleButton.parentNode.removeChild(this.toggleButton);
+    }
+  }
+
+  onGameStart() {
+    this.hideMatchmakingUI();
+    this.showBattleUI();
+  }
+
+  hideMatchmakingUI() {
+    this.isUIVisible = false;
+
+    if (this.uiContainer) {
+      this.uiContainer.style.display = "none";
+    }
+    if (this.toggleButton) {
+      this.toggleButton.style.display = "none";
+    }
+  }
+
+  showBattleUI() {
+    // 透過 tag 尋找戰鬥 HUD 的根節點（請在 Editor 中設定）
+    const hudRoot =
+      this.app.root.findByTag("battle-ui")[0] ||
+      this.app.root.findByTag("battle-hud-root")[0];
+
+    if (hudRoot) {
+      hudRoot.enabled = true;
     }
   }
 }
