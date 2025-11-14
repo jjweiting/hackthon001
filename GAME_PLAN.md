@@ -1579,3 +1579,65 @@ class SeededRandom {
 **文件版本**: 1.0  
 **最後更新**: 2025年11月14日  
 **狀態**: 待選擇方案進行開發
+
+---
+
+## Battle Arena 實作計畫（開發藍圖）
+
+### 開發目標
+
+- 建立一個 2v2 / 4v4 的多人射擊競技場遊戲。
+- 充分利用既有的 `GameManager` / `NetworkManager` 結構與 VIVERSE SDK。
+- 所有場景物件（地圖、障礙物、武器箱等）由程式動態生成。
+
+### 開發步驟總覽
+
+1. **整合現有 Network 架構**
+   - 檢視 `game/managers/game-manager.mjs` 與 `game/managers/network-manager.mjs`。
+   - 明確 `BattleGameManager` 如何存取 `network`、`multiplayer`、`currentRoom`、`sessionId` 等。
+
+2. **實作 `BattleGameManager` 主控腳本**
+   - 建立 `game/managers/battle-game-manager.mjs`。
+   - 負責整個對戰流程（waiting → countdown → playing → finished）。
+   - 管理隊伍分配（teamA / teamB）、分數、比賽時間、map seed。
+   - 整合本地玩家資料（血量、武器、K/D）與相關腳本掛載。
+
+3. **程式化競技場產生器 `ArenaGenerator`**
+   - 建立 `game/scripts/battle-arena/arena-generator.mjs`。
+   - 依 seed 產生地板、邊界牆、障礙物、重生點與武器箱 spawn points。
+   - 支援 `regenerate(seed)` 清除舊場景並重建，供每場比賽重新生成地圖。
+
+4. **戰鬥與生命系統**
+   - 在 `game/scripts/battle-arena/` 下建立：
+     - `player-combat.mjs`：處理射擊輸入、武器開火、計算擊中結果並透過 network 廣播事件。
+     - `health-system.mjs`：管理玩家血量、死亡事件，觸發重生與計分。
+     - `weapon-system.mjs`：定義各種武器的基本數值（傷害、射速、射程、散布等）。
+   - 先完成本地邏輯，再補上他人射擊的視覺效果同步。
+
+5. **武器箱與拾取機制**
+   - 建立 `weapon-pickup.mjs` 以及對應的 `weapon-factory.mjs` / `projectile-factory.mjs`。
+   - 使用 `ArenaGenerator` 提供的武器 spawn points，生成武器箱 Entity。
+   - 玩家觸發碰撞或互動後，發送 `weapon-pickup` 訊息並更新玩家當前武器。
+
+6. **計分、重生與比賽規則**
+   - 在 `BattleGameManager` 中：
+     - 擴充 `handlePlayerKilled` 更新隊伍分數與個人 K/D。
+     - 利用 `arenaGenerator.spawnPoints` 完成 `respawnPlayer`。
+     - 透過 `matchDuration` / `targetScore` 控制比賽結束條件與結果判定。
+
+7. **UI 顯示與遊戲體驗**
+   - 在 `game/scripts/ui/` 下建立：
+     - `battle-hud.mjs`：顯示 HP、當前武器、隊伍分數、剩餘時間。
+     - `team-select-ui.mjs`：若未來需要玩家手動選隊，可在此擴充。
+     - `match-results-ui.mjs`：顯示勝負原因、K/D 與隊伍表現。
+   - `BattleGameManager` 呼叫這些 UI 腳本更新畫面。
+
+8. **Network 事件規格與測試流程**
+   - 統一定義 network message schema，例如：
+     - `player-shoot`, `player-hit`, `player-killed`, `score-update`, `weapon-pickup`, `team-assignment`。
+   - 在 2 人以上房間中實測：
+     - 自動分隊是否平均。
+     - 射擊、受傷、死亡、重生、計分是否正確同步。
+     - 地圖生成是否在所有玩家端一致（相同 seed）。
+
+> 後續的實作會依照以上 1 → 8 步驟進行，優先完成核心玩法（步驟 1–6），再逐步補齊 UI 與體驗優化（步驟 7–8）。
