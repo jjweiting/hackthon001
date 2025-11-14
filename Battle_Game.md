@@ -909,6 +909,52 @@ class SeededRandom {
 
 ---
 
+## 3. PlayCanvas 掛載設定指引
+
+為了讓上述腳本在 PlayCanvas Editor 中正常運作，建議使用以下掛載方式：
+
+### 3.1 GameManager / BattleGameManager
+
+- 在場景中建立一個空的根節點（若專案模板已存在可直接使用），命名為 `GameRoot`（名稱可自訂）。
+- 為該 Entity：
+  - 加上 Tag：`game-manager`
+  - 添加 Script Component，掛上：
+    - `gameManager`（對應 `game/managers/game-manager.mjs`）
+      - 設定 `appId`、`debug` 等屬性。
+    - `battleGameManager`（對應 `game/managers/battle-game-manager.mjs`）
+      - 可調整 `gameMode`（2v2 / 4v4）、`matchDuration`、`targetScore` 等。
+
+> `BattleGameManager` 會在初始化時透過 `game-manager` tag 取得 `GameManager` 實例，並連結 NetworkManager。
+
+### 3.2 玩家（Local Player）
+
+- 本地玩家 Entity 上已由 VIVERSE 模板掛好 `localPlayerNetwork` 等腳本，無需手動加戰鬥腳本。
+- `BattleGameManager` 在本地玩家準備好時，會自動在玩家 Entity 上建立：
+  - `playerCombat`（`game/scripts/battle-arena/player-combat.mjs`）
+  - `healthSystem`（`game/scripts/battle-arena/health-system.mjs`）
+
+### 3.3 競技場與武器箱
+
+- `BattleGameManager` 會呼叫 `arenaGenerator`（`game/scripts/battle-arena/arena-generator.mjs`）：
+  - 自動生成地板、牆、障礙物及 Team A / B 重生點。
+  - 依照 seed 在場內多個位置產生武器箱。
+- 每個武器箱 Entity 會自動掛上：
+  - `weaponPickup`（`game/scripts/battle-arena/weapon-pickup.mjs`）
+    - 當本地玩家碰撞（trigger enter）時，會送出 `weapon-pickup` 訊息並更新本地武器。
+
+### 3.4 HUD 顯示（血量 / 分數 / 計時）
+
+- 在 UI Canvas 下建立一個空的 UI Entity（例如 `BattleHUD`），添加 Script Component：
+  - 掛上 `battleHud`（`game/scripts/ui/battle-hud.mjs`）。
+  - 在 Script 屬性中指定：
+    - `healthText`：指向顯示 HP 的 Text Element Entity。
+    - `scoreText`：指向顯示隊伍分數的 Text Element Entity。
+    - `timerText`：指向顯示剩餘時間的 Text Element Entity。
+
+> `BattleHud` 每 frame 會從 `BattleGameManager` 讀取當前血量、分數和時間，並更新 UI。
+
+---
+
 ## 3. Player Combat System
 
 處理玩家的射擊、瞄準、武器切換等戰鬥邏輯。

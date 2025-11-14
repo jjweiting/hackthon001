@@ -1,5 +1,6 @@
 import * as pc from "playcanvas";
 import { Script } from "playcanvas";
+import { WeaponPickup } from "./weapon-pickup.mjs";
 
 class SeededRandom {
   constructor(seed) {
@@ -85,6 +86,7 @@ export class ArenaGenerator extends Script {
     this.createObstacles(rng);
     this.createSpawnPoints();
     this.createWeaponBoxSpawns(rng);
+    this.createInitialWeaponBoxes(rng);
   }
 
   createFloor() {
@@ -285,5 +287,54 @@ export class ArenaGenerator extends Script {
       });
     }
   }
-}
 
+  createInitialWeaponBoxes(rng) {
+    const weaponTypes = ["shotgun", "rifle", "sniper", "rocket"];
+
+    this.weaponSpawnPoints.forEach((spawn, index) => {
+      if (rng.random() > 0.5) {
+        const weaponType =
+          weaponTypes[Math.floor(rng.random() * weaponTypes.length)];
+        this.spawnWeaponBox(index, weaponType);
+      }
+    });
+  }
+
+  spawnWeaponBox(spawnIndex, weaponType) {
+    const spawn = this.weaponSpawnPoints[spawnIndex];
+    if (!spawn || spawn.occupied) return;
+
+    const box = new pc.Entity(`weapon-box-${spawnIndex}`);
+    box.addComponent("render", {
+      type: "box"
+    });
+    box.setLocalScale(1, 1, 1);
+    box.setPosition(spawn.position);
+
+    const material = new pc.StandardMaterial();
+    material.diffuse = new pc.Color(0.9, 0.8, 0.1);
+    material.emissive = material.diffuse;
+    material.update();
+    box.render.material = material;
+
+    box.addComponent("collision", {
+      type: "box",
+      halfExtents: new pc.Vec3(0.5, 0.5, 0.5),
+      axis: 1
+    });
+    box.addComponent("rigidbody", {
+      type: "kinematic"
+    });
+
+    box.tags.add("dynamic", "arena", "weapon-box");
+
+    box.addComponent("script");
+    const pickup = box.script.create(WeaponPickup);
+    pickup.weaponType = weaponType;
+
+    this.app.root.addChild(box);
+
+    spawn.occupied = true;
+    spawn.entity = box;
+  }
+}
