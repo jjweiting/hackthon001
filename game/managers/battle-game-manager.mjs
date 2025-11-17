@@ -71,7 +71,11 @@ export class BattleGameManager extends Script {
   onDestroy() {
     if (!this.network) return;
     this.network.off("room-actor-changed", this.onRoomActorChanged, this);
-    this.network.off("game-start", this.onGameStart, this);
+    this.network.off("game-start", this.onMatchmakingGameStart, this);
+    this.network.off("game-countdown-start", this.onCountdownStart, this);
+    this.network.off("game-countdown-end", this.onCountdownEnd, this);
+    this.network.off("game-time-up", this.onGameTimeUp, this);
+    this.network.off("game-end", this.onGameEnd, this);
     this.network.off("receive-message", this.onNetworkMessage, this);
   }
 
@@ -108,7 +112,11 @@ export class BattleGameManager extends Script {
 
   setupNetworkEvents() {
     this.network.on("room-actor-changed", this.onRoomActorChanged, this);
-    this.network.on("game-start", this.onGameStart, this);
+    this.network.on("game-start", this.onMatchmakingGameStart, this);
+    this.network.on("game-countdown-start", this.onCountdownStart, this);
+    this.network.on("game-countdown-end", this.onCountdownEnd, this);
+    this.network.on("game-time-up", this.onGameTimeUp, this);
+    this.network.on("game-end", this.onGameEnd, this);
     this.network.on("receive-message", this.onNetworkMessage, this);
   }
 
@@ -143,36 +151,51 @@ export class BattleGameManager extends Script {
     }
   }
 
-  onGameStart() {
-    this.startCountdown();
+  onMatchmakingGameStart() {
+    // Matchmaking 開始遊戲時，先生成競技場（不等待倒數）
+    this.gameState.mapSeed = Date.now();
+    this.generateArena(this.gameState.mapSeed);
   }
 
-  startCountdown() {
+  onCountdownStart(data) {
+    console.log("Countdown started: ", data);
     this.gameState.phase = "countdown";
-    this.gameState.mapSeed = Date.now();
 
-    this.generateArena(this.gameState.mapSeed);
+    const seconds = data?.second ?? 3;
+    this.countdownTimeRemaining = seconds;
+    this.countdownLastShown = null;
+    this.showCountdownUI(Math.ceil(this.countdownTimeRemaining));
 
-    let countdown = 3;
-    this.countdownTimer = 0;
-    this.currentCountdownValue = countdown;
-    this.showCountdownUI(countdown);
+    // 倒數開始時關閉 Game Start 按鈕
+    if (this.network && typeof this.network.hideGameStartButton === "function") {
+      this.network.hideGameStartButton();
+    }
   }
 
   updateCountdown(dt) {
     if (this.gameState.phase !== "countdown") return;
+    if (this.countdownTimeRemaining == null) return;
 
-    this.countdownTimer += dt;
-    if (this.countdownTimer >= 1) {
-      this.countdownTimer = 0;
-      this.currentCountdownValue -= 1;
-      if (this.currentCountdownValue >= 0) {
-        this.showCountdownUI(this.currentCountdownValue);
-      } else {
-        this.off("update", this.updateCountdown, this);
-        this.startMatch();
-      }
+    this.countdownTimeRemaining -= dt;
+    const currentInt = Math.max(0, Math.ceil(this.countdownTimeRemaining));
+
+    if (this.countdownLastShown !== currentInt) {
+      this.countdownLastShown = currentInt;
+      this.showCountdownUI(currentInt);
     }
+  }
+
+  onCountdownEnd(data) {
+    // 伺服器宣告倒數結束，此時 data.second 通常是遊戲總時間
+    const playSeconds = data?.second;
+    if (typeof playSeconds === "number" && playSeconds > 0) {
+      this.matchDuration = playSeconds;
+      this.gameState.matchTime = 0;
+      this.showGameTimeUI(playSeconds);
+    }
+
+    // 倒數已結束，不再顯示「GO!」訊息
+    this.hideCountdownUI();
   }
 
   startMatch() {
@@ -190,6 +213,9 @@ export class BattleGameManager extends Script {
     if (this.gameState.phase !== "playing") return;
 
     this.gameState.matchTime += dt;
+
+    const remaining = Math.max(0, this.matchDuration - this.gameState.matchTime);
+    this.showGameTimeUI(remaining);
 
     if (this.gameState.matchTime >= this.matchDuration) {
       this.endMatch("time_limit");
@@ -328,6 +354,14 @@ export class BattleGameManager extends Script {
     }, this.respawnTime * 1000);
   }
 
+  onGameTimeUp() {
+    this.endMatch("time_limit");
+  }
+
+  onGameEnd() {
+    this.endMatch("server_game_end");
+  }
+
   respawnPlayer(player) {
     player.health = player.maxHealth;
     player.isAlive = true;
@@ -381,6 +415,8 @@ export class BattleGameManager extends Script {
 
   endMatch(reason) {
     this.gameState.phase = "finished";
+    this.hideCountdownUI();
+    this.hideGameTimeUI();
     this.showMatchResults(reason);
   }
 
@@ -423,6 +459,48 @@ export class BattleGameManager extends Script {
 
   hideCountdownUI() {
     const el = document.getElementById("battle-countdown-message");
+    if (el && el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
+  }
+
+  showGameTimeUI(remainingSeconds) {
+    const existing = document.getElementById("battle-game-timer");
+
+    const total = Math.max(0, Math.floor(remainingSeconds));
+    const min = Math.floor(total / 60)
+      .toString()
+      .padStart(2, "0");
+    const sec = (total % 60).toString().padStart(2, "0");
+    const text = `${min}:${sec}`;
+
+    let el = existing;
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "battle-game-timer";
+      el.style.cssText = `
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 8px 16px;
+        border-radius: 6px;
+        color: white;
+        font-weight: bold;
+        font-size: 32px;
+        z-index: 1001;
+        background: rgba(0, 0, 0, 0.6);
+        border: 2px solid #0241e2;
+        text-align: center;
+      `;
+      document.body.appendChild(el);
+    }
+
+    el.textContent = text;
+  }
+
+  hideGameTimeUI() {
+    const el = document.getElementById("battle-game-timer");
     if (el && el.parentNode) {
       el.parentNode.removeChild(el);
     }

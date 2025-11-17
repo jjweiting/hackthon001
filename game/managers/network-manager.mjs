@@ -77,6 +77,10 @@ class NetworkManager extends pc.EventHandler {
     this.on('game-start', () => {
       this.handleOnGameStart();
     });
+
+    this.on('game-error', (data) => {
+      this.handleGameError(data);
+    });
   }
 
   handleTransformUpdate(message) {
@@ -128,6 +132,113 @@ class NetworkManager extends pc.EventHandler {
     this.multiplayer.sendMessage(sessionId, { type, payload });
   }
 
+  showGameStartButton() {
+    if (!this.multiplayer.currentClient?.game?.gameStart) {
+      console.warn('🐹 Game module not ready, cannot show Game Start button.');
+      return;
+    }
+
+    let btn = document.getElementById('battle-game-start-btn');
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.id = 'battle-game-start-btn';
+      btn.textContent = 'Game Start';
+      btn.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 16px 32px;
+        font-size: 24px;
+        font-weight: bold;
+        color: #ffffff;
+        background: #0241e2;
+        border: 2px solid #ffffff;
+        border-radius: 8px;
+        cursor: pointer;
+        z-index: 1003;
+        box-shadow: 0 0 16px rgba(0, 0, 0, 0.6);
+      `;
+
+      btn.onclick = async () => {
+        btn.disabled = true;
+        btn.textContent = 'Waiting...';
+        try {
+          await this.multiplayer.currentClient.game.gameStart();
+          // 按鈕保留，由倒數事件決定何時關閉
+        } catch (e) {
+          console.error('🐹 Failed to call game.gameStart:', e);
+          btn.disabled = false;
+          btn.textContent = 'Game Start';
+        }
+      };
+
+      document.body.appendChild(btn);
+    } else {
+      btn.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Game Start';
+    }
+  }
+
+  hideGameStartButton() {
+    const btn = document.getElementById('battle-game-start-btn');
+    if (btn && btn.parentNode) {
+      btn.parentNode.removeChild(btn);
+    }
+  }
+
+  showGameStartButton() {
+    if (!this.multiplayer.currentClient?.game?.gameStart) {
+      console.warn('🐹 Game module not ready, cannot show Game Start button.');
+      return;
+    }
+
+    let btn = document.getElementById('battle-game-start-btn');
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.id = 'battle-game-start-btn';
+      btn.textContent = 'Game Start';
+      btn.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 16px 32px;
+        font-size: 24px;
+        font-weight: bold;
+        color: #ffffff;
+        background: #0241e2;
+        border: 2px solid #ffffff;
+        border-radius: 8px;
+        cursor: pointer;
+        z-index: 1003;
+        box-shadow: 0 0 16px rgba(0, 0, 0, 0.6);
+      `;
+
+      btn.onclick = async () => {
+        btn.disabled = true;
+        btn.textContent = 'Starting...';
+        try {
+          await this.multiplayer.currentClient.game.gameStart();
+          if (btn && btn.parentNode) {
+            btn.parentNode.removeChild(btn);
+          }
+        } catch (e) {
+          console.error('🐹 Failed to call game.gameStart:', e);
+          btn.disabled = false;
+          btn.textContent = 'Game Start';
+        }
+      };
+
+      document.body.appendChild(btn);
+    } else {
+      btn.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Game Start';
+    }
+  }
+
   async enterLobby() {
     const promises = [];
     promises.push(this.leaveChannel());
@@ -160,16 +271,8 @@ class NetworkManager extends pc.EventHandler {
   }
 
   async startGame() {
+    // 在 Lobby 中呼叫，通知 Matchmaking 開始遊戲（關閉房間）
     await this.matchmaking.startGame();
-
-    // 啟動 Game 模組的 gameStart，讓伺服器控制倒數與遊戲時間
-    if (this.multiplayer.currentClient?.game?.gameStart) {
-      try {
-        await this.multiplayer.currentClient.game.gameStart();
-      } catch (e) {
-        console.error('🐹 Failed to call game.gameStart:', e);
-      }
-    }
   }
 
   async handleOnGameStart(roomId) {
@@ -177,6 +280,12 @@ class NetworkManager extends pc.EventHandler {
     await this.leaveChannel();
     await this.enterChannel(this.currentRoom.id);
     console.log('🐯 Matchmaking game started, re-entered channel:', this.currentRoom.id);
+
+    // 只有房主在「遊戲房」內看到 Game Start 按鈕，點擊後才觸發 gameStart
+    const isHost = this.currentRoom.created_by_me;
+    if (isHost) {
+      this.showGameStartButton();
+    }
   }
 
   handleRoomListUpdated(rooms) {
@@ -227,6 +336,15 @@ class NetworkManager extends pc.EventHandler {
     const ids = [...this.actorEntityMap.keys()];
     this.cleanupActorEntities(ids);
     await this.multiplayer.removeClient();
+  }
+
+  handleGameError(data) {
+    console.error('🐹 Game error:', data);
+
+    // 若玩家尚未全數準備好，保持或重新顯示 Game Start 按鈕
+    if (data?.error_type === 'player_not_all_ready') {
+      this.showGameStartButton();
+    }
   }
 }
 

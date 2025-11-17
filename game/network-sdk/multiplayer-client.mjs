@@ -10,6 +10,7 @@ class MultiPlayerClient {
     this.manager = manager;
     this.currentClient = null;
     this.isConnected = false; 
+    this._connectedPromise = null;
     MultiPlayerClient.instance = this;
   }
 
@@ -44,10 +45,7 @@ class MultiPlayerClient {
     // 倒數結束，正式進入遊戲
     if (typeof game.onCountdownToEnd === "function") {
       game.onCountdownToEnd((data) => {
-        console.log("🦊 game/onCountdownToEnd:", data);
         this.manager.fire("game-countdown-end", data);
-        // 同步觸發現有的 game-start 流程（BattleGameManager 會接）
-        this.manager.fire("game-start");
       });
     }
 
@@ -87,7 +85,7 @@ class MultiPlayerClient {
   async createClient(roomId) {
     if (this.currentClient) {
       console.warn("🦊 Client already exists");
-      return;
+      return this._connectedPromise;
     }
 
 
@@ -96,34 +94,54 @@ class MultiPlayerClient {
       this.appId
     );
 
-    // NOTE: Can't get onConnected event, need to check with SDK team
-    client.onConnected(() => {
-      this.isConnected = true;
-      this.addEventListeners();
-      console.log("🦊 Multiplayer client connected.");
+    // 等待 onConnected，確保連線完成後才進行後續操作
+    this._connectedPromise = new Promise((resolve) => {
+      client.onConnected(() => {
+        this.isConnected = true;
+        this.addEventListeners();
+        console.log("🦊 Multiplayer client connected.");
+        resolve();
+      });
     });
 
-    // 啟用 Game 模組，並設定基本倒數與遊戲時間（可依需求調整）
-    const options = {
-      modules: {
-        game: {
-          enabled: true,
-          desc: "Battle Arena game",
-          ready_time: 3,          // 開始前倒數秒數
-          start_delay_time: 0.5,  // 倒數結束到真正開始的延遲
-          play_time: 600,         // 遊戲時間（秒）
-          total_player: 4,
-          change_second: 10,
-          min_total_player: 2,
-          max_total_player: 8,
-          wait_player_timeout: 100
-        }
-      }
-    };
+    // Lobby 與遊戲房使用不同的 init 策略：
+    // - Lobby（例如 "lobbyyy<appId>"）不啟用 game 模組
+    // - 真正進入遊戲房（roomId）才用 options 啟用 game 模組
+    const isLobbyChannel =
+      typeof roomId === "string" && roomId.startsWith("lobbyyy");
 
-    await client.init(options);
-    this.currentClient = client;
-    this.addGameEventListeners();
+    const isHost = this.manager.currentRoom?.created_by_me;
+
+    if (isLobbyChannel) {
+      await client.init();
+      this.currentClient = client;
+    } else if (isHost) {
+      const options = {
+        modules: {
+          game: {
+            enabled: true,
+            desc: "Battle Arena game",
+            ready_time: 3,
+            start_delay_time: 0.5,
+            play_time: 600,
+            total_player: 1,
+            min_total_player: 1,
+            max_total_player: 8,
+            wait_player_timeout: 100
+          }
+        }
+      };
+
+      await client.init(options);
+      this.currentClient = client;
+      this.addGameEventListeners();
+    } else {
+      await client.init();
+      this.currentClient = client;
+      this.addGameEventListeners();
+    }
+
+    await this._connectedPromise;
   }
 
   async removeClient() {
@@ -136,12 +154,12 @@ class MultiPlayerClient {
 
   sendMessage(player, message) {
     if (!this.currentClient) {
-      console.warn("🦊 No connected client to send message");
+      console.warn("🦊 No connected client to send message: ", message);
       return;
     }
 
-    // NOTE: Can't get onConnected event, need to check with SDK team
     if (!this.isConnected) {
+      // 還沒連線完成就送訊息直接忽略即可，避免刷警告
       return;
     }
 
