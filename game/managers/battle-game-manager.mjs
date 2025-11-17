@@ -71,7 +71,6 @@ export class BattleGameManager extends Script {
   onDestroy() {
     if (!this.network) return;
     this.network.off("room-actor-changed", this.onRoomActorChanged, this);
-    this.network.off("game-start", this.onMatchmakingGameStart, this);
     this.network.off("game-countdown-start", this.onCountdownStart, this);
     this.network.off("game-countdown-end", this.onCountdownEnd, this);
     this.network.off("game-time-up", this.onGameTimeUp, this);
@@ -112,7 +111,6 @@ export class BattleGameManager extends Script {
 
   setupNetworkEvents() {
     this.network.on("room-actor-changed", this.onRoomActorChanged, this);
-    this.network.on("game-start", this.onMatchmakingGameStart, this);
     this.network.on("game-countdown-start", this.onCountdownStart, this);
     this.network.on("game-countdown-end", this.onCountdownEnd, this);
     this.network.on("game-time-up", this.onGameTimeUp, this);
@@ -149,12 +147,6 @@ export class BattleGameManager extends Script {
     if (this.isRoomLeader()) {
       this.broadcastTeamAssignment();
     }
-  }
-
-  onMatchmakingGameStart() {
-    // Matchmaking 開始遊戲時，先生成競技場（不等待倒數）
-    this.gameState.mapSeed = Date.now();
-    this.generateArena(this.gameState.mapSeed);
   }
 
   onCountdownStart(data) {
@@ -196,6 +188,9 @@ export class BattleGameManager extends Script {
 
     // 倒數已結束，不再顯示「GO!」訊息
     this.hideCountdownUI();
+
+    // 倒數結束後切換到 playing 狀態，開始計時與 HUD 更新
+    this.startMatch();
   }
 
   startMatch() {
@@ -216,6 +211,7 @@ export class BattleGameManager extends Script {
 
     const remaining = Math.max(0, this.matchDuration - this.gameState.matchTime);
     this.showGameTimeUI(remaining);
+    this.showStatusHUD();
 
     if (this.gameState.matchTime >= this.matchDuration) {
       this.endMatch("time_limit");
@@ -248,6 +244,9 @@ export class BattleGameManager extends Script {
     const { type, payload, player } = message;
 
     switch (type) {
+      case "map-init":
+        this.handleMapInit(payload);
+        break;
       case "player-shoot":
         this.handlePlayerShoot({
           playerId: player,
@@ -272,6 +271,15 @@ export class BattleGameManager extends Script {
       default:
         break;
     }
+  }
+
+  handleMapInit(message) {
+    const { seed } = message;
+    if (typeof seed !== "number") return;
+
+    // 所有玩家（包含房主）都用同一個 seed 生成競技場
+    this.gameState.mapSeed = seed;
+    this.generateArena(seed);
   }
 
   handlePlayerShoot(message) {
@@ -319,9 +327,19 @@ export class BattleGameManager extends Script {
   }
 
   handleWeaponPickup(message) {
-    if (!this.network || !this.localPlayer) return;
-    const { playerId, weaponType } = message;
-    if (playerId === this.network.sessionId) {
+    if (!this.network) return;
+    const { playerId, weaponType, boxName } = message;
+
+    // 所有 client：移除對應的武器箱
+    if (boxName) {
+      const boxEntity = this.app.root.findByName(boxName);
+      if (boxEntity && !boxEntity.destroyed) {
+        boxEntity.destroy();
+      }
+    }
+
+    // 只有撿到的人更新自己的當前武器
+    if (this.localPlayer && playerId === this.network.sessionId) {
       this.localPlayer.currentWeapon = weaponType;
     }
   }
@@ -365,10 +383,17 @@ export class BattleGameManager extends Script {
   respawnPlayer(player) {
     player.health = player.maxHealth;
     player.isAlive = true;
-    player.currentWeapon = "pistol";
 
     const spawnPoint = this.getSpawnPoint(player.team);
-    if (spawnPoint && player.entity) {
+    if (!spawnPoint || !player.entity) return;
+
+    const isLocal =
+      !!player.entity.script &&
+      !!player.entity.script.localPlayerNetwork;
+
+    // 避免與 VIVERSE 本身的本地移動同步打架：
+    // 只對「遠端玩家」進行位置重置，本地玩家交給 VIVERSE 自己處理。
+    if (!isLocal) {
       player.entity.setPosition(spawnPoint);
     }
   }
@@ -421,6 +446,9 @@ export class BattleGameManager extends Script {
   }
 
   update(dt) {
+    // 持續更新狀態 HUD（HP / Weapon / Score），不論目前是倒數或遊戲中
+    this.showStatusHUD();
+
     if (this.gameState.phase === "countdown") {
       this.updateCountdown(dt);
     } else if (this.gameState.phase === "playing") {
@@ -506,6 +534,41 @@ export class BattleGameManager extends Script {
     }
   }
 
+  showStatusHUD() {
+    const existing = document.getElementById("battle-status-hud");
+
+    const hp = this.localPlayer ? Math.max(0, Math.floor(this.localPlayer.health)) : 0;
+    const weapon = this.localPlayer ? this.localPlayer.currentWeapon : "none";
+    const scoreA = this.gameState.teamA.score;
+    const scoreB = this.gameState.teamB.score;
+
+    const text = `HP: ${hp} | Weapon: ${weapon} | A: ${scoreA}  B: ${scoreB}`;
+
+    let el = existing;
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "battle-status-hud";
+      el.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 8px 16px;
+        border-radius: 6px;
+        color: white;
+        font-weight: bold;
+        font-size: 18px;
+        z-index: 1001;
+        background: rgba(0, 0, 0, 0.6);
+        border: 2px solid #0241e2;
+        text-align: center;
+      `;
+      document.body.appendChild(el);
+    }
+
+    el.textContent = text;
+  }
+
   showDamageEffect() {
     // TODO: implement damage visual effect
   }
@@ -521,6 +584,42 @@ export class BattleGameManager extends Script {
   }
 
   createShootEffect(position, direction, weaponType) {
-    // TODO: implement remote shoot effect
+    if (!position || !direction) return;
+
+    const len = 8;
+    const start = new pc.Vec3(position.x, position.y, position.z);
+    const dir = new pc.Vec3(direction.x, direction.y, direction.z).normalize();
+    const end = start.clone().add(dir.clone().mulScalar(len));
+    const mid = start.clone().add(end).mulScalar(0.5);
+
+    const beam = new pc.Entity("bullet-trace");
+    beam.addComponent("render", {
+      type: "box"
+    });
+
+    const dist = start.distance(end);
+    beam.setLocalScale(0.1, 0.1, dist);
+
+    // 讓光束朝向射擊方向
+    beam.setPosition(mid);
+    beam.lookAt(end);
+
+    const material = new pc.StandardMaterial();
+    material.emissive = weaponType === "sniper"
+      ? new pc.Color(0, 1, 1)
+      : weaponType === "rocket"
+      ? new pc.Color(1, 0.5, 0)
+      : new pc.Color(1, 1, 0);
+    material.update();
+    beam.render.material = material;
+
+    this.app.root.addChild(beam);
+
+    // 極短暫的視覺效果
+    setTimeout(() => {
+      if (!beam.destroyed) {
+        beam.destroy();
+      }
+    }, 100);
   }
 }

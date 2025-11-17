@@ -11,6 +11,13 @@ export class WeaponPickup extends Script {
    */
   weaponType = "rifle";
 
+  /**
+   * @attribute
+   * @title Spawn Index
+   * @type {number}
+   */
+  spawnIndex = -1;
+
   initialize() {
     const managerEntity = this.app.root.findByTag("game-manager")[0];
     this.battleManager = managerEntity?.script?.battleGameManager ?? null;
@@ -29,9 +36,13 @@ export class WeaponPickup extends Script {
   onTriggerEnter(other) {
     if (!this.battleManager || !this.battleManager.network) return;
 
-    // 僅本地玩家可以撿起
-    const isLocalPlayer = !!(other.script && other.script.localPlayerNetwork);
-    if (!isLocalPlayer) return;
+    // 僅本地玩家可以撿起：用 battleManager.localPlayer 的 entity 判斷，而不是 script 名稱
+    const localPlayerEntity = this.battleManager.localPlayer?.entity;
+    const root = other.getRoot ? other.getRoot() : other;
+    const isLocalPlayer = localPlayerEntity && (other === localPlayerEntity || root === localPlayerEntity);
+    if (!isLocalPlayer) {
+      return;
+    }
 
     const playerId = this.battleManager.network.sessionId;
 
@@ -43,11 +54,14 @@ export class WeaponPickup extends Script {
     // 廣播給其他玩家
     this.battleManager.network.sendMessage("weapon-pickup", {
       playerId,
-      weaponType: this.weaponType
+      weaponType: this.weaponType,
+      boxName: this.entity.name,
+      spawnIndex: this.spawnIndex
     });
+
+    console.log("[WeaponPickup] picked up", this.weaponType, "by", playerId);
 
     // 移除武器箱
     this.entity.destroy();
   }
 }
-

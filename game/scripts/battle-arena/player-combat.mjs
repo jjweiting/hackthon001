@@ -57,9 +57,9 @@ export class PlayerCombat extends Script {
 
     const result = this.app.systems.rigidbody.raycastFirst(from, to);
 
-    if (result && result.entity) {
+    if (result && result.entity && result.entity.script) {
       const targetEntity = result.entity;
-      const targetId = targetEntity?.script?.remotePlayerNetwork?.sessionId;
+      const targetId = targetEntity.script.remotePlayerNetwork?.sessionId;
       if (targetId && this.battleManager.network) {
         this.battleManager.network.sendMessage("player-hit", {
           targetId,
@@ -72,10 +72,25 @@ export class PlayerCombat extends Script {
     if (this.battleManager.network) {
       this.battleManager.network.sendMessage("player-shoot", {
         playerId: this.battleManager.network.sessionId,
-        direction: forward,
+        direction: { x: forward.x, y: forward.y, z: forward.z },
         weaponType: localPlayer.currentWeapon,
-        position: from
+        position: { x: from.x, y: from.y, z: from.z }
       });
     }
+
+    // 本地玩家也顯示射擊光束
+    if (typeof this.battleManager.createShootEffect === "function") {
+      this.battleManager.createShootEffect(
+        { x: from.x, y: from.y, z: from.z },
+        { x: forward.x, y: forward.y, z: forward.z },
+        localPlayer.currentWeapon
+      );
+    }
+
+    console.log("[PlayerCombat] shoot", {
+      weapon: localPlayer.currentWeapon,
+      from,
+      to
+    });
   }
 }

@@ -90,7 +90,9 @@ class NetworkManager extends pc.EventHandler {
     if (!entity) {
       entity = new pc.Entity(`RemotePlayer_${player}`);
       entity.addComponent('script');
-      entity.script.create(RemotePlayerNetwork);
+      const net = entity.script.create(RemotePlayerNetwork);
+      // 記錄這個遠端玩家的 sessionId，方便射線檢測時識別
+      net.sessionId = player;
       entity.script.create(RemotePlayerAvatar, {
         properties: {
           displayName: payload.profile?.displayName || 'Remote Player',
@@ -164,6 +166,18 @@ class NetworkManager extends pc.EventHandler {
         btn.disabled = true;
         btn.textContent = 'Waiting...';
         try {
+          // 由 Host 在按 Game Start 時決定 seed 並廣播給所有玩家，用於同步競技場
+          const seed = Math.floor(Math.random() * 1e9) || Date.now();
+          this.sendMessage('map-init', { seed });
+
+           // 本機端（房主）直接套用相同 seed 生成競技場，
+           // 避免依賴 general channel 是否會收到自己的訊息
+           const gmEntity = this.pcApp.root.findByTag('game-manager')[0];
+           const battleManager = gmEntity?.script?.battleGameManager;
+           if (battleManager && typeof battleManager.handleMapInit === 'function') {
+             battleManager.handleMapInit({ seed });
+           }
+
           await this.multiplayer.currentClient.game.gameStart();
           // 按鈕保留，由倒數事件決定何時關閉
         } catch (e) {
@@ -185,57 +199,6 @@ class NetworkManager extends pc.EventHandler {
     const btn = document.getElementById('battle-game-start-btn');
     if (btn && btn.parentNode) {
       btn.parentNode.removeChild(btn);
-    }
-  }
-
-  showGameStartButton() {
-    if (!this.multiplayer.currentClient?.game?.gameStart) {
-      console.warn('🐹 Game module not ready, cannot show Game Start button.');
-      return;
-    }
-
-    let btn = document.getElementById('battle-game-start-btn');
-    if (!btn) {
-      btn = document.createElement('button');
-      btn.id = 'battle-game-start-btn';
-      btn.textContent = 'Game Start';
-      btn.style.cssText = `
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        padding: 16px 32px;
-        font-size: 24px;
-        font-weight: bold;
-        color: #ffffff;
-        background: #0241e2;
-        border: 2px solid #ffffff;
-        border-radius: 8px;
-        cursor: pointer;
-        z-index: 1003;
-        box-shadow: 0 0 16px rgba(0, 0, 0, 0.6);
-      `;
-
-      btn.onclick = async () => {
-        btn.disabled = true;
-        btn.textContent = 'Starting...';
-        try {
-          await this.multiplayer.currentClient.game.gameStart();
-          if (btn && btn.parentNode) {
-            btn.parentNode.removeChild(btn);
-          }
-        } catch (e) {
-          console.error('🐹 Failed to call game.gameStart:', e);
-          btn.disabled = false;
-          btn.textContent = 'Game Start';
-        }
-      };
-
-      document.body.appendChild(btn);
-    } else {
-      btn.style.display = 'block';
-      btn.disabled = false;
-      btn.textContent = 'Game Start';
     }
   }
 

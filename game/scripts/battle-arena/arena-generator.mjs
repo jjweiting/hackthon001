@@ -308,7 +308,7 @@ export class ArenaGenerator extends Script {
     box.addComponent("render", {
       type: "box"
     });
-    box.setLocalScale(1, 1, 1);
+    box.setLocalScale(0.8, 0.8, 0.8);
     box.setPosition(spawn.position);
 
     const material = new pc.StandardMaterial();
@@ -319,11 +319,9 @@ export class ArenaGenerator extends Script {
 
     box.addComponent("collision", {
       type: "box",
-      halfExtents: new pc.Vec3(0.5, 0.5, 0.5),
-      axis: 1
-    });
-    box.addComponent("rigidbody", {
-      type: "kinematic"
+      halfExtents: new pc.Vec3(0.4, 0.4, 0.4),
+      axis: 1,
+      isTrigger: true
     });
 
     box.tags.add("dynamic", "arena", "weapon-box");
@@ -331,6 +329,7 @@ export class ArenaGenerator extends Script {
     box.addComponent("script");
     const pickup = box.script.create(WeaponPickup);
     pickup.weaponType = weaponType;
+    pickup.spawnIndex = spawnIndex;
 
     this.app.root.addChild(box);
 
