@@ -64,7 +64,6 @@ class MatchmakingClient {
       true
     );
     this.currentClient = client;
-    console.log("🐯 Matchmaking client created:", client);
 
     return new Promise((resolve, reject) => {
       client.on("onConnect", async () => {

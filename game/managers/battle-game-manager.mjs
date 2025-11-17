@@ -157,8 +157,6 @@ export class BattleGameManager extends Script {
     this.countdownTimer = 0;
     this.currentCountdownValue = countdown;
     this.showCountdownUI(countdown);
-
-    this.on("update", this.updateCountdown, this);
   }
 
   updateCountdown(dt) {
@@ -181,11 +179,11 @@ export class BattleGameManager extends Script {
     this.gameState.phase = "playing";
     this.gameState.matchTime = 0;
 
+    this.hideCountdownUI();
+
     if (this.localPlayer) {
       this.respawnPlayer(this.localPlayer);
     }
-
-    this.on("update", this.updateMatchTimer, this);
   }
 
   updateMatchTimer(dt) {
@@ -383,14 +381,51 @@ export class BattleGameManager extends Script {
 
   endMatch(reason) {
     this.gameState.phase = "finished";
-    this.off("update", this.updateMatchTimer, this);
-    this.off("update", this.updateCountdown, this);
     this.showMatchResults(reason);
   }
 
+  update(dt) {
+    if (this.gameState.phase === "countdown") {
+      this.updateCountdown(dt);
+    } else if (this.gameState.phase === "playing") {
+      this.updateMatchTimer(dt);
+    }
+  }
+
   showCountdownUI(count) {
-    // TODO: implement countdown UI
-    console.log("Battle countdown:", count);
+    const existing = document.getElementById("battle-countdown-message");
+    const text = count > 0 ? `${count}` : "GO!";
+
+    let el = existing;
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "battle-countdown-message";
+      el.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 20px 40px;
+        border-radius: 8px;
+        color: white;
+        font-weight: bold;
+        font-size: 64px;
+        z-index: 1002;
+        background: rgba(0, 0, 0, 0.6);
+        border: 2px solid #0241e2;
+        text-align: center;
+      `;
+      document.body.appendChild(el);
+    }
+
+    el.textContent = text;
+  }
+
+  hideCountdownUI() {
+    const el = document.getElementById("battle-countdown-message");
+    if (el && el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
   }
 
   showDamageEffect() {

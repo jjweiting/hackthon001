@@ -53,6 +53,14 @@ class NetworkManager extends pc.EventHandler {
         case 'animation-update':
           this.handleAnimationUpdate(message);
           break;
+        // Battle Arena 用事件，交由 BattleGameManager 監聽處理
+        case 'player-shoot':
+        case 'player-hit':
+        case 'player-killed':
+        case 'score-update':
+        case 'weapon-pickup':
+        case 'team-assignment':
+          break;
         default:
           console.warn('🐹 Unknown message type:', type);
       }
@@ -153,6 +161,15 @@ class NetworkManager extends pc.EventHandler {
 
   async startGame() {
     await this.matchmaking.startGame();
+
+    // 啟動 Game 模組的 gameStart，讓伺服器控制倒數與遊戲時間
+    if (this.multiplayer.currentClient?.game?.gameStart) {
+      try {
+        await this.multiplayer.currentClient.game.gameStart();
+      } catch (e) {
+        console.error('🐹 Failed to call game.gameStart:', e);
+      }
+    }
   }
 
   async handleOnGameStart(roomId) {

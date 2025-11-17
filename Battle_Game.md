@@ -946,10 +946,11 @@ class SeededRandom {
 
 - 在 UI Canvas 下建立一個空的 UI Entity（例如 `BattleHUD`），添加 Script Component：
   - 掛上 `battleHud`（`game/scripts/ui/battle-hud.mjs`）。
-  - 在 Script 屬性中指定：
-    - `healthText`：指向顯示 HP 的 Text Element Entity。
-    - `scoreText`：指向顯示隊伍分數的 Text Element Entity。
-    - `timerText`：指向顯示剩餘時間的 Text Element Entity。
+  - 在其子節點下建立三個 Text 元件，名稱分別為：
+     - `HealthText`：顯示 HP。
+     - `ScoreText`：顯示隊伍分數。
+     - `TimerText`：顯示剩餘時間。
+  - `battleHud` 會自動依照這三個名稱尋找子節點，不需要在 Script Inspector 手動綁定。
 
 > `BattleHud` 每 frame 會從 `BattleGameManager` 讀取當前血量、分數和時間，並更新 UI。
 
