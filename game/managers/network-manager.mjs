@@ -376,6 +376,19 @@ class NetworkManager extends pc.EventHandler {
     // 只有房主在「遊戲房」內看到 Game Start 按鈕，點擊後才觸發 gameStart
     const isHost = this.currentRoom.created_by_me;
     if (isHost) {
+      // 房主一進遊戲房就先產生「基礎競技場」（地板 / 牆 / 出生點），但尚未產生障礙物與武器箱。
+      // 透過 map-init 廣播 seed，讓所有玩家用相同 seed 建立相同的基礎場景。
+      const seed = Math.floor(Math.random() * 1e9) || Date.now();
+      this.sendMessage('map-init', { seed });
+
+      // 伺服器未必會把 map-init 再回傳給自己，因此這裡直接通知 BattleGameManager，
+      // 讓房主本地也用同一個 seed 生成基礎競技場。
+      const gmEntity = this.pcApp.root.findByTag('game-manager')[0];
+      const battleManager = gmEntity?.script?.battleGameManager;
+      if (battleManager && typeof battleManager.handleMapInit === 'function') {
+        battleManager.handleMapInit({ seed });
+      }
+
       this.showGameStartButton();
     }
   }

@@ -57,12 +57,12 @@ export class ArenaGenerator extends Script {
     this.weaponSpawnPoints = [];
 
     const initialSeed = this.seed || Date.now();
-    this.generate(initialSeed);
+    this.generateStatic(initialSeed);
   }
 
   regenerate(seed) {
     this.cleanup();
-    this.generate(seed);
+    this.generateStatic(seed);
   }
 
   cleanup() {
@@ -75,6 +75,30 @@ export class ArenaGenerator extends Script {
     this.spawnPoints.A.length = 0;
     this.spawnPoints.B.length = 0;
     this.weaponSpawnPoints.length = 0;
+  }
+
+  /**
+   * 僅產生「基礎競技場」：地板、外牆、出生點（與 debug marker）
+   * 不產生障礙物與武器箱。
+   */
+  generateStatic(seed) {
+    this.seed = seed;
+    this.createFloor();
+    this.createWalls();
+    this.createSpawnPoints();
+  }
+
+  /**
+   * 產生「動態物件」：障礙物、武器箱出生點與初始武器箱。
+   * 通常在倒數結束時由 Room Host 呼叫，並搭配 exportMapConfig() 廣播給所有人。
+   */
+  generateDynamic(seed) {
+    const useSeed = typeof seed === "number" ? seed : this.seed || Date.now();
+    this.seed = useSeed;
+    const rng = new SeededRandom(useSeed);
+    this.createObstacles(rng);
+    this.createWeaponBoxSpawns(rng);
+    this.createInitialWeaponBoxes(rng);
   }
 
   generate(seed) {

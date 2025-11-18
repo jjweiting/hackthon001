@@ -174,6 +174,12 @@ export class BattleGameManager extends Script {
     if (this.countdownLastShown !== currentInt) {
       this.countdownLastShown = currentInt;
       this.showCountdownUI(currentInt);
+
+      // 當倒數「第一次」進入 0（GO! 瞬間）且自己是房主時：
+      // 產生障礙物 / 武器箱，並將 mapConfig 廣播給所有人。
+      if (currentInt === 0 && this.isRoomLeader()) {
+        this.generateAndBroadcastDynamicArena();
+      }
     }
   }
 
@@ -290,8 +296,8 @@ export class BattleGameManager extends Script {
     this.generateArena(seed);
   }
 
-  handleMapConfig(message) {
-    const { mapConfig } = message || {};
+  handleMapConfig(payload) {
+    const { mapConfig } = payload || {};
     if (!mapConfig) return;
 
     let arenaGenerator = this.entity.script?.arenaGenerator;
@@ -304,6 +310,37 @@ export class BattleGameManager extends Script {
 
     if (typeof arenaGenerator.generateFromConfig === "function") {
       arenaGenerator.generateFromConfig(mapConfig);
+    }
+  }
+
+  /**
+   * 僅在房主端於倒數結束瞬間呼叫：
+   * - 使用 ArenaGenerator 產生障礙物與武器箱
+   * - 匯出 mapConfig 並透過 network 傳給所有 Client
+   */
+  generateAndBroadcastDynamicArena() {
+    if (!this.network) return;
+
+    let arenaGenerator = this.entity.script?.arenaGenerator;
+    if (!arenaGenerator) {
+      if (!this.entity.script) {
+        this.entity.addComponent("script");
+      }
+      arenaGenerator = this.entity.script.create(ArenaGenerator);
+    }
+
+    const seed = this.gameState.mapSeed || Date.now();
+    this.gameState.mapSeed = seed;
+
+    if (typeof arenaGenerator.generateDynamic === "function") {
+      arenaGenerator.generateDynamic(seed);
+    }
+
+    if (typeof arenaGenerator.exportMapConfig === "function") {
+      const mapConfig = arenaGenerator.exportMapConfig();
+      if (mapConfig) {
+        this.network.sendMessage("map-config", { mapConfig });
+      }
     }
   }
 
