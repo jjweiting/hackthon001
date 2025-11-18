@@ -20,8 +20,7 @@ class MatchmakingClient {
       throw new Error("No matchmaking client. Call createClient() first.");
     }
 
-    const result = await this.currentClient.getAvailableRooms();
-    const rooms = result.rooms || [];
+    const rooms = await this.currentClient.getAvailableRooms();
     this.manager.fire("room-list-updated", rooms);
   }
 

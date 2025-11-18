@@ -25,12 +25,16 @@ export class NetworkUI extends pc.Script {
 
     this.networkManager = gameManager.network;
     this.uiContainer = null;
-    this.toggleButton = null;
     this.roomListContainer = null;
-    this.currentRoomInfo = null;
+    this.currentRoomInfoContent = null;
+    this.statusPill = null;
+    this.leaveRoomBtn = null;
+    this.startGameBtn = null;
+    this.playerMetaEl = null;
+    this.toggleButton = null;
     this.isUIVisible = true;
-    this.createToggleButton();
     this.createUI();
+    this.createToggleButton();
     this.addEventListeners();
 
     if (this.networkManager) {
@@ -42,151 +46,183 @@ export class NetworkUI extends pc.Script {
   }
 
   createUI() {
-    // Add CSS for responsive design
+    // Add CSS for matchmaking lobby overlay
     this.addResponsiveCSS();
 
-    // Create main UI container
-    this.uiContainer = document.createElement("div");
-    this.uiContainer.id = "network-ui";
-    this.uiContainer.className = "network-ui-container";
+    // Overlay root
+    const overlay = document.createElement("div");
+    overlay.className = "mm-overlay";
+    overlay.id = "network-ui-overlay";
+    this.uiContainer = overlay;
 
-    // Current Room Info
-    this.currentRoomInfo = document.createElement("div");
-    this.currentRoomInfo.style.cssText =
-      "margin-bottom: 15px; padding: 8px; background: #021542; border-radius: 4px; border: 1px solid #0241e2;";
-    this.uiContainer.appendChild(this.currentRoomInfo);
+    // Main panel
+    const panel = document.createElement("div");
+    panel.className = "mm-panel";
+    overlay.appendChild(panel);
 
-    this.uiContainer.addEventListener("wheel", (e) => {
-      e.stopPropagation();
-    });
+    // Header
+    const header = document.createElement("div");
+    header.className = "mm-header";
+    panel.appendChild(header);
 
-    this.uiContainer.addEventListener("mousedown", (e) => {
-      e.stopPropagation();
-    });
+    const titleBlock = document.createElement("div");
+    titleBlock.className = "mm-title-block";
+    header.appendChild(titleBlock);
 
-    // Room Creation Section
-    this.createRoomSection();
+    const title = document.createElement("h1");
+    title.className = "mm-title";
+    title.textContent = "Battle Arena Lobby";
+    titleBlock.appendChild(title);
 
-    // Room List Section
-    this.createRoomListSection();
+    const subtitle = document.createElement("div");
+    subtitle.className = "mm-subtitle";
+    subtitle.textContent = "Join a room or start a new match";
+    titleBlock.appendChild(subtitle);
 
-    // Debug Info
-    this.createDebugSection();
+    const statusPill = document.createElement("div");
+    statusPill.className = "mm-status-pill mm-status-lobby";
+    statusPill.textContent = "In Lobby";
+    header.appendChild(statusPill);
+    this.statusPill = statusPill;
 
-    document.body.appendChild(this.uiContainer);
+    // Main content
+    const main = document.createElement("div");
+    main.className = "mm-main";
+    panel.appendChild(main);
+
+    // Left: player + current room + actions
+    const left = document.createElement("div");
+    left.className = "mm-left";
+    main.appendChild(left);
+
+    const playerCard = document.createElement("div");
+    playerCard.className = "mm-player-card";
+    left.appendChild(playerCard);
+
+    const playerName = document.createElement("div");
+    playerName.className = "mm-player-name";
+    playerName.textContent = "Player";
+    playerCard.appendChild(playerName);
+
+    const playerMeta = document.createElement("div");
+    playerMeta.className = "mm-player-meta";
+    playerMeta.textContent = "";
+    playerCard.appendChild(playerMeta);
+    this.playerMetaEl = playerMeta;
+
+    const roomInfoBox = document.createElement("div");
+    roomInfoBox.className = "mm-room-info-box";
+    left.appendChild(roomInfoBox);
+
+    const roomInfoTitle = document.createElement("div");
+    roomInfoTitle.className = "mm-room-info-title";
+    roomInfoTitle.textContent = "Current Room";
+    roomInfoBox.appendChild(roomInfoTitle);
+
+    const roomInfoContent = document.createElement("div");
+    roomInfoBox.appendChild(roomInfoContent);
+    this.currentRoomInfoContent = roomInfoContent;
+
+    const actions = document.createElement("div");
+    actions.className = "mm-actions";
+    left.appendChild(actions);
+
+    const createRoomBtn = document.createElement("button");
+    createRoomBtn.className = "mm-btn mm-btn-secondary";
+    createRoomBtn.textContent = "Create Room";
+    createRoomBtn.onclick = () => this.createRoom();
+    actions.appendChild(createRoomBtn);
+
+    const leaveRoomBtn = document.createElement("button");
+    leaveRoomBtn.className = "mm-btn mm-btn-ghost";
+    leaveRoomBtn.textContent = "Leave Room";
+    leaveRoomBtn.disabled = true;
+    leaveRoomBtn.onclick = () => this.leaveRoom();
+    actions.appendChild(leaveRoomBtn);
+    this.leaveRoomBtn = leaveRoomBtn;
+
+    // Start Game button (host only)
+    const startGameBtn = document.createElement("button");
+    startGameBtn.className = "mm-btn mm-btn-primary";
+    startGameBtn.textContent = "Start Game";
+    startGameBtn.disabled = true;
+    startGameBtn.onclick = () => this.startGame();
+    actions.appendChild(startGameBtn);
+    this.startGameBtn = startGameBtn;
+
+    // Right: room list
+    const right = document.createElement("div");
+    right.className = "mm-right";
+    main.appendChild(right);
+
+    const rightHeader = document.createElement("div");
+    rightHeader.className = "mm-right-header";
+    right.appendChild(rightHeader);
+
+    const rightTitle = document.createElement("div");
+    rightTitle.className = "mm-right-title";
+    rightTitle.textContent = "Available Rooms";
+    rightHeader.appendChild(rightTitle);
+
+    const rightControls = document.createElement("div");
+    rightControls.className = "mm-right-controls";
+    rightHeader.appendChild(rightControls);
+
+    const searchInput = document.createElement("input");
+    searchInput.className = "mm-search";
+    searchInput.type = "text";
+    searchInput.placeholder = "Search room...";
+    rightControls.appendChild(searchInput);
+
+    const refreshBtn = document.createElement("button");
+    refreshBtn.className = "mm-refresh";
+    refreshBtn.textContent = "Refresh";
+    refreshBtn.onclick = () => this.refreshRooms();
+    rightControls.appendChild(refreshBtn);
+
+    const roomList = document.createElement("div");
+    roomList.className = "mm-room-list";
+    right.appendChild(roomList);
+    this.roomListContainer = roomList;
+
+    // Footer as debug bar
+    const footer = document.createElement("div");
+    footer.className = "mm-footer";
+    panel.appendChild(footer);
+
+    const footerLeft = document.createElement("div");
+    footerLeft.textContent = "";
+    footer.appendChild(footerLeft);
+
+    const footerRight = document.createElement("div");
+    footerRight.textContent = "";
+    footer.appendChild(footerRight);
+    // Reuse existing debugInfo hook to write into footer right
+    this.debugInfo = footerRight;
+
+    document.body.appendChild(overlay);
   }
 
   createRoomSection() {
-    const roomSection = document.createElement("div");
-    roomSection.style.cssText =
-      "margin-bottom: 15px; padding: 10px; background: #021542; border-radius: 4px; border: 1px solid #0241e2;";
-
-    const roomTitle = document.createElement("h4");
-    roomTitle.textContent = "Room Management";
-    roomTitle.style.cssText = "margin: 0 0 10px 0; color: #ffffff;";
-    roomSection.appendChild(roomTitle);
-
-    // Room name input
-    const roomNameInput = document.createElement("input");
-    roomNameInput.type = "text";
-    roomNameInput.placeholder = "Room name";
-    roomNameInput.id = "room-name-input";
-    roomNameInput.style.cssText =
-      "width: 100%; padding: 5px; margin-bottom: 8px; border: 1px solid #0241e2; border-radius: 3px; background: #000000; color: white;";
-    roomSection.appendChild(roomNameInput);
-    roomNameInput.addEventListener("keydown", (e) => e.stopPropagation());
-
-    // Create room button
-    const createRoomBtn = document.createElement("button");
-    createRoomBtn.textContent = "Create Room";
-    createRoomBtn.style.cssText =
-      "width: 48%; padding: 8px; margin-right: 4%; background: #0241e2; color: white; border: none; border-radius: 3px; cursor: pointer;";
-    createRoomBtn.onclick = () => this.createRoom();
-    roomSection.appendChild(createRoomBtn);
-
-    // Leave room button
-    const leaveRoomBtn = document.createElement("button");
-    leaveRoomBtn.textContent = "Leave Room";
-    leaveRoomBtn.id = "leave-room-btn";
-    leaveRoomBtn.style.cssText =
-      "width: 48%; padding: 8px; background: #ff534b; color: white; border: none; border-radius: 3px; cursor: pointer; opacity: 0.5;";
-    leaveRoomBtn.disabled = true;
-    leaveRoomBtn.onclick = () => this.leaveRoom();
-    roomSection.appendChild(leaveRoomBtn);
-
-    // Start Game button
-    const startGameBtn = document.createElement("button");
-    startGameBtn.textContent = "Start Game";
-    startGameBtn.id = "start-game-btn";
-    startGameBtn.style.cssText =
-      "width: 100%; padding: 8px; margin-top: 8px; background: #ff534b; color: white; border: none; border-radius: 3px; cursor: pointer; opacity: 0.5;";
-    startGameBtn.disabled = true;
-    startGameBtn.onclick = () => this.startGame();
-    roomSection.appendChild(startGameBtn);
-
-    this.uiContainer.appendChild(roomSection);
+    // legacy, no-op with new lobby UI
   }
 
   createRoomListSection() {
-    const listSection = document.createElement("div");
-    listSection.style.cssText = "margin-bottom: 15px;";
-
-    const listTitle = document.createElement("h4");
-    listTitle.textContent = "Available Rooms";
-    listTitle.style.cssText = "margin: 0 0 10px 0; color: #ffffff;";
-    listSection.appendChild(listTitle);
-
-    // Refresh button
-    const refreshBtn = document.createElement("button");
-    refreshBtn.textContent = "Refresh Rooms";
-    refreshBtn.style.cssText =
-      "width: 100%; padding: 8px; margin-bottom: 10px; background: #0241e2; color: white; border: none; border-radius: 3px; cursor: pointer;";
-    refreshBtn.onclick = () => this.refreshRooms();
-    listSection.appendChild(refreshBtn);
-
-    // Room list container
-    this.roomListContainer = document.createElement("div");
-    this.roomListContainer.style.cssText =
-      "max-height: 200px; overflow-y: auto; border: 1px solid #021542; border-radius: 3px; padding: 5px; background: #021542;";
-    listSection.appendChild(this.roomListContainer);
-
-    this.uiContainer.appendChild(listSection);
+    // legacy, no-op with new lobby UI
   }
 
   createDebugSection() {
-    const debugSection = document.createElement("div");
-    debugSection.style.cssText =
-      "padding: 10px; background: #021542; border-radius: 4px; border: 1px solid #0241e2;";
-
-    const debugTitle = document.createElement("h4");
-    debugTitle.textContent = "Debug Info";
-    debugTitle.style.cssText = "margin: 0 0 10px 0; color: #ccc;";
-    debugSection.appendChild(debugTitle);
-
-    this.debugInfo = document.createElement("div");
-    this.debugInfo.style.cssText =
-      "font-size: 10px; color: #ccc; line-height: 1.4;";
-    debugSection.appendChild(this.debugInfo);
-
-    this.uiContainer.appendChild(debugSection);
+    // legacy, no-op with new lobby UI
   }
 
   createToggleButton() {
-    // Create toggle button
+    // Floating toggle button to show / hide the lobby panel
     this.toggleButton = document.createElement("button");
     this.toggleButton.textContent = "◀";
     this.toggleButton.id = "network-ui-toggle";
     this.toggleButton.className = "network-ui-toggle";
 
     this.toggleButton.onclick = () => this.toggleUI();
-
-    this.toggleButton.addEventListener("mouseenter", () => {
-      this.toggleButton.style.background = "#0241e2";
-    });
-
-    this.toggleButton.addEventListener("mouseleave", () => {
-      this.toggleButton.style.background = "#021542";
-    });
 
     document.body.appendChild(this.toggleButton);
   }
@@ -198,23 +234,353 @@ export class NetworkUI extends pc.Script {
     const style = document.createElement("style");
     style.id = "network-ui-styles";
     style.textContent = `
-      .network-ui-container {
+      .mm-overlay {
         position: fixed;
-        top: 50%;
-        transform: translateY(-50%);
-        right: 60px;
-        width: 350px;
-        background: #000000;
-        color: white;
-        padding: 15px;
-        border-radius: 8px;
-        font-family: Arial, sans-serif;
-        font-size: 12px;
+        inset: 0;
+        background: transparent;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
         z-index: 1000;
-        max-height: 80dvh;
+      }
+
+      .mm-panel {
+        width: 960px;
+        max-width: 100%;
+        height: 540px;
+        max-height: calc(100vh - 48px);
+        background: rgba(255, 255, 255, 0.88);
+        border-radius: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.95);
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
+        padding: 20px 24px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        backdrop-filter: blur(12px);
+      }
+
+      .mm-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 16px;
+      }
+
+      .mm-title-block {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .mm-title {
+        margin: 0;
+        font-size: 22px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #111827;
+      }
+
+      .mm-subtitle {
+        font-size: 12px;
+        color: #4b5563;
+      }
+
+      .mm-status-pill {
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: rgba(16, 185, 129, 0.12);
+        border: 1px solid rgba(16, 185, 129, 0.7);
+        color: #047857;
+      }
+
+      .mm-status-pill.mm-status-lobby {
+        background: rgba(243, 244, 246, 0.9);
+        border-color: rgba(209, 213, 219, 0.9);
+        color: #374151;
+      }
+
+      .mm-main {
+        flex: 1;
+        display: flex;
+        gap: 18px;
+        overflow: hidden;
+      }
+
+      .mm-left {
+        flex: 0 0 260px;
+        background: rgba(249, 250, 251, 0.9);
+        border-radius: 18px;
+        padding: 14px 14px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        border: 1px solid rgba(209, 213, 219, 0.9);
+      }
+
+      .mm-player-card {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .mm-player-name {
+        font-weight: 600;
+        font-size: 14px;
+        color: #111827;
+      }
+
+      .mm-player-meta {
+        font-size: 11px;
+        color: #4b5563;
+        line-height: 1.4;
+      }
+
+      .mm-room-info-box {
+        padding: 8px 10px;
+        border-radius: 10px;
+        background: rgba(243, 244, 246, 0.95);
+        border: 1px solid rgba(209, 213, 219, 0.9);
+        font-size: 11px;
+        line-height: 1.5;
+        color: #111827;
+      }
+
+      .mm-room-info-title {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6b7280;
+        margin-bottom: 4px;
+      }
+
+      .mm-label {
+        color: #6b7280;
+      }
+
+      .mm-actions {
+        margin-top: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .mm-btn {
+        border: none;
+        border-radius: 999px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 10px 14px;
+        transition: background 0.15s ease, box-shadow 0.15s ease,
+          transform 0.05s ease, opacity 0.15s ease;
+      }
+
+      .mm-btn:active {
+        transform: translateY(1px);
+      }
+
+      .mm-btn-primary {
+        background: linear-gradient(135deg, #2563eb, #1d4ed8);
+        color: #fff;
+        box-shadow: 0 0 16px rgba(37, 99, 235, 0.4);
+      }
+
+      .mm-btn-primary:hover {
+        background: linear-gradient(135deg, #3b82f6, #2563eb);
+        box-shadow: 0 0 22px rgba(37, 99, 235, 0.6);
+      }
+
+      .mm-btn-secondary {
+        background: rgba(243, 244, 246, 0.95);
+        color: #111827;
+        border: 1px solid rgba(209, 213, 219, 0.9);
+      }
+
+      .mm-btn-secondary:hover {
+        background: rgba(229, 231, 235, 0.95);
+      }
+
+      .mm-btn-ghost {
+        background: transparent;
+        color: #6b7280;
+        border: 1px dashed rgba(209, 213, 219, 0.9);
+      }
+
+      .mm-btn-ghost:hover {
+        background: rgba(243, 244, 246, 0.9);
+      }
+
+      .mm-btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        box-shadow: none;
+      }
+
+      .mm-right {
+        flex: 1;
+        background: rgba(249, 250, 251, 0.96);
+        border-radius: 18px;
+        padding: 14px 14px 16px;
+        border: 1px solid rgba(209, 213, 219, 0.9);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .mm-right-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+      }
+
+      .mm-right-title {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: #111827;
+      }
+
+      .mm-right-controls {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .mm-search {
+        padding: 6px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(209, 213, 219, 0.9);
+        background: rgba(255, 255, 255, 0.95);
+        color: #111827;
+        font-size: 11px;
+        min-width: 120px;
+      }
+
+      .mm-refresh {
+        font-size: 11px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.9);
+        background: transparent;
+        color: #4b5563;
+        cursor: pointer;
+      }
+
+      .mm-refresh:hover {
+        background: rgba(229, 231, 235, 0.9);
+      }
+
+      .mm-room-list {
+        margin-top: 6px;
+        flex: 1;
+        border-radius: 12px;
+        background: radial-gradient(circle at top, rgba(255, 255, 255, 0.95) 0, rgba(243, 244, 246, 0.96) 60%);
+        padding: 8px 8px 10px;
         overflow-y: auto;
-        border: 2px solid #021542;
-        transition: all 0.3s ease;
+      }
+
+      .mm-room-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 10px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(209, 213, 219, 0.9);
+        margin-bottom: 8px;
+      }
+
+      .mm-room-card-info {
+        max-width: 70%;
+      }
+
+      .mm-room-name {
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 2px;
+        color: #111827;
+      }
+
+      .mm-room-meta {
+        font-size: 11px;
+        color: #4b5563;
+      }
+
+      .mm-room-tags {
+        margin-top: 2px;
+        font-size: 10px;
+        color: #6b7280;
+        opacity: 0.8;
+      }
+
+      .mm-room-btn {
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: none;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: #2563eb;
+        color: #fff;
+        transition: background 0.15s ease;
+      }
+
+      .mm-room-btn:hover {
+        background: #1d4ed8;
+      }
+
+      .mm-room-empty {
+        font-size: 11px;
+        color: #6b7280;
+        text-align: center;
+        padding: 20px 6px;
+        opacity: 0.8;
+      }
+
+      .mm-footer {
+        margin-top: 12px;
+        font-size: 10px;
+        color: #6b7280;
+        display: flex;
+        justify-content: space-between;
+        opacity: 0.85;
+      }
+
+      @media (max-width: 900px) {
+        .mm-panel {
+          height: auto;
+        }
+        .mm-main {
+          flex-direction: column;
+        }
+        .mm-left {
+          flex: 0 0 auto;
+          order: 2;
+        }
+        .mm-right {
+          order: 1;
+          height: 260px;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .mm-panel {
+          padding: 12px 14px;
+          border-radius: 18px;
+        }
+        .mm-title {
+          font-size: 18px;
+        }
       }
 
       .network-ui-toggle {
@@ -224,9 +590,9 @@ export class NetworkUI extends pc.Script {
         right: 10px;
         width: 40px;
         height: 40px;
-        background: #021542;
-        color: white;
-        border: 2px solid #0241e2;
+        background: #ffffff;
+        color: #111827;
+        border: 1px solid #d1d5db;
         border-radius: 50%;
         cursor: pointer;
         z-index: 1001;
@@ -234,41 +600,21 @@ export class NetworkUI extends pc.Script {
         display: flex;
         align-items: center;
         justify-content: center;
-        transition: all 0.3s ease;
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+        transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.05s ease;
       }
 
-      /* Mobile styles */
+      .network-ui-toggle:hover {
+        background: #f3f4f6;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+      }
+
       @media screen and (max-width: 768px) {
-        .network-ui-container {
-          right: 10px;
-          left: 10px;
-          width: auto;
-          max-height: 60vh;
-          padding: 10px;
-          font-size: 10px;
-        }
-        
         .network-ui-toggle {
           right: 15px;
-          left: auto;
-          width: 30px;
-          height: 30px;
-          font-size: 12px;
-        }
-      }
-
-      /* Small mobile styles */
-      @media screen and (max-width: 480px) {
-        .network-ui-container {
-          max-height: 50vh;
-          padding: 8px;
-          font-size: 9px;
-        }
-        
-        .network-ui-toggle {
-          width: 28px;
-          height: 28px;
-          font-size: 11px;
+          width: 32px;
+          height: 32px;
+          font-size: 13px;
         }
       }
     `;
@@ -277,16 +623,16 @@ export class NetworkUI extends pc.Script {
   }
 
   toggleUI() {
+    if (!this.uiContainer || !this.toggleButton) return;
+
     this.isUIVisible = !this.isUIVisible;
 
     if (this.isUIVisible) {
-      this.uiContainer.style.display = "block";
+      this.uiContainer.style.display = "flex";
       this.toggleButton.textContent = "◀";
-      this.toggleButton.style.right = "10px";
     } else {
       this.uiContainer.style.display = "none";
       this.toggleButton.textContent = "▶";
-      this.toggleButton.style.right = "10px";
     }
   }
 
@@ -316,8 +662,7 @@ export class NetworkUI extends pc.Script {
   }
 
   async createRoom() {
-    const roomName =
-      document.getElementById("room-name-input").value || `Room-${Date.now()}`;
+    const roomName = `Room-${Date.now()}`;
 
     try {
       await this.networkManager.createRoom(roomName, {
@@ -381,44 +726,52 @@ export class NetworkUI extends pc.Script {
   }
 
   updateRoomList(rooms) {
+    if (!this.roomListContainer) return;
+
     this.roomListContainer.innerHTML = "";
 
-    if (!rooms || rooms.length === 0) {
-      const noRooms = document.createElement("div");
-      noRooms.textContent = "No rooms available";
-      noRooms.style.cssText = "text-align: center; color: #888; padding: 10px;";
-      this.roomListContainer.appendChild(noRooms);
-      return;
-    }
+    const allRooms = rooms || [];
+    const openRooms = allRooms.filter(
+      (room) => !room.is_closed && !room.is_game_started
+    );
 
-    const openRooms = rooms.filter((room) => !room.is_closed && !room.is_game_started);
     const currentRoom = this.networkManager?.currentRoom;
     const isInRoom = !!currentRoom;
 
-    openRooms.forEach((room) => {
-      const roomElement = document.createElement("div");
-      roomElement.style.cssText =
-        "padding: 8px; margin-bottom: 5px; background: #000000; border-radius: 3px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border: 1px solid #0241e2;";
+    if (openRooms.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "mm-room-empty";
+      empty.textContent = "No rooms available yet. Try creating one.";
+      this.roomListContainer.appendChild(empty);
+      return;
+    }
 
-      const roomInfo = document.createElement("div");
-      roomInfo.innerHTML = `
-        <strong>${room.name}</strong><br>
-        <small>Players: ${room.actors.length}/${room.max_players} | Mode: ${room.mode}</small>
-      `;
+    openRooms.forEach((room) => {
+      const card = document.createElement("div");
+      card.className = "mm-room-card";
+
+      const info = document.createElement("div");
+      info.className = "mm-room-card-info";
+
+      const nameEl = document.createElement("div");
+      nameEl.className = "mm-room-name";
+      nameEl.textContent = room.name;
+      info.appendChild(nameEl);
+
+      const metaEl = document.createElement("div");
+      metaEl.className = "mm-room-meta";
+      metaEl.textContent = `Players: ${room.actors.length}/${room.max_players}`;
+      info.appendChild(metaEl);
+
+      const tagsEl = document.createElement("div");
+      tagsEl.className = "mm-room-tags";
+      tagsEl.textContent = `Mode: ${room.mode || "N/A"}`;
+      info.appendChild(tagsEl);
 
       const joinBtn = document.createElement("button");
-      joinBtn.textContent = isInRoom ? "Leave current room first" : "Join";
+      joinBtn.className = "mm-room-btn";
+      joinBtn.textContent = isInRoom ? "In Room" : "Join";
       joinBtn.disabled = isInRoom;
-      joinBtn.style.cssText = `
-        padding: 4px 8px; 
-        background: ${isInRoom ? "#666" : "#0241e2"}; 
-        color: white; 
-        border: none; 
-        border-radius: 2px; 
-        cursor: ${isInRoom ? "not-allowed" : "pointer"}; 
-        font-size: 10px;
-        opacity: ${isInRoom ? "0.5" : "1"};
-      `;
 
       if (!isInRoom) {
         joinBtn.onclick = (e) => {
@@ -427,43 +780,44 @@ export class NetworkUI extends pc.Script {
         };
       }
 
-      roomElement.appendChild(roomInfo);
-      roomElement.appendChild(joinBtn);
-      this.roomListContainer.appendChild(roomElement);
+      card.appendChild(info);
+      card.appendChild(joinBtn);
+      this.roomListContainer.appendChild(card);
     });
   }
 
   updateCurrentRoomInfo() {
     const currentRoom = this.networkManager?.currentRoom;
 
+    if (!this.currentRoomInfoContent || !this.leaveRoomBtn || !this.startGameBtn) {
+      return;
+    }
+
     if (currentRoom) {
-      this.currentRoomInfo.innerHTML = `
-        <strong>Current Room:</strong> ${currentRoom.name}<br>
-        <small>ID: ${currentRoom.id}</small><br>
-        <small>Players: ${currentRoom.actors.length}/${
-        currentRoom.max_players
-      }</small><br>
-        <small>Created by me: ${
-          currentRoom.created_by_me ? "Yes" : "No"
-        }</small>
+      const isHost = !!currentRoom.created_by_me;
+
+      this.currentRoomInfoContent.innerHTML = `
+        <div><span class="mm-label">Name:</span> ${currentRoom.name}</div>
+        <div><span class="mm-label">Players:</span> ${currentRoom.actors.length}/${currentRoom.max_players}</div>
+        <div><span class="mm-label">Role:</span> ${isHost ? "Host" : "Member"}</div>
       `;
 
-      // Start Game button (only for room creator)
-      document.getElementById("start-game-btn").disabled =
-        !currentRoom.created_by_me;
-      document.getElementById("start-game-btn").style.opacity =
-        currentRoom.created_by_me ? "1" : "0.5";
+      if (this.statusPill) {
+        this.statusPill.textContent = "In Room";
+      }
 
-      // Leave room button (available for all room members)
-      document.getElementById("leave-room-btn").disabled = false;
-      document.getElementById("leave-room-btn").style.opacity = "1";
+      this.startGameBtn.disabled = !isHost;
+      this.leaveRoomBtn.disabled = false;
     } else {
-      this.currentRoomInfo.innerHTML = "<em>No room joined</em>";
+      this.currentRoomInfoContent.innerHTML =
+        "<div>No room joined. Create or join one.</div>";
 
-      document.getElementById("start-game-btn").disabled = true;
-      document.getElementById("start-game-btn").style.opacity = "0.5";
-      document.getElementById("leave-room-btn").disabled = true;
-      document.getElementById("leave-room-btn").style.opacity = "0.5";
+      if (this.statusPill) {
+        this.statusPill.textContent = "In Lobby";
+      }
+
+      this.startGameBtn.disabled = true;
+      this.leaveRoomBtn.disabled = true;
     }
   }
 
@@ -480,13 +834,13 @@ export class NetworkUI extends pc.Script {
   updateDebugInfo() {
     if (!this.networkManager) return;
 
-    const debugText = `
-Session ID: ${this.networkManager.sessionId}<br>
-Current Channel: ${this.networkManager.currentChannel || "None"}<br>
-Active Players: ${this.networkManager.actorEntityMap.size}<br>
-App ID: ${this.networkManager.appId}
-    `;
-    this.debugInfo.innerHTML = debugText.trim();
+    if (!this.debugInfo) return;
+
+    const sessionId = this.networkManager.sessionId;
+    const channel = this.networkManager.currentChannel || "None";
+    const appId = this.networkManager.appId;
+
+    this.debugInfo.textContent = `Channel: ${channel} • Session: ${sessionId} • App: ${appId}`;
   }
 
   showMessage(text, type = "info") {
@@ -555,12 +909,11 @@ App ID: ${this.networkManager.appId}
     // 回到 Lobby 時重新顯示 matchmaking panel 並刷新當前房間資訊
     this.isUIVisible = true;
     if (this.uiContainer) {
-      this.uiContainer.style.display = "block";
+      this.uiContainer.style.display = "flex";
     }
     if (this.toggleButton) {
-      this.toggleButton.style.display = "block";
+      this.toggleButton.style.display = "flex";
       this.toggleButton.textContent = "◀";
-      this.toggleButton.style.right = "10px";
     }
 
     // 重新依照 NetworkManager.currentRoom 更新顯示內容
