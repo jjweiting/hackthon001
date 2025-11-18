@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Matchmaking Lobby Redesign</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+      background: #050814;
+      color: #111827;
+    }
+
+    /* 整個 Lobby 的全畫面遮罩（白色霧面感） */
+    .mm-overlay {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(circle at top, rgba(255, 255, 255, 0.25) 0, #050814 60%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .mm-panel {
+      width: 960px;
+      max-width: 100%;
+      height: 540px;
+      max-height: calc(100vh - 48px);
+      background: rgba(255, 255, 255, 0.88);
+      border-radius: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.95);
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      backdrop-filter: blur(12px);
+    }
+
+    .mm-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .mm-title-block {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .mm-title {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #111827;
+    }
+
+    .mm-subtitle {
+      font-size: 12px;
+      color: #4b5563;
+    }
+
+    .mm-status-pill {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.7);
+      color: #047857;
+    }
+
+    .mm-status-pill.mm-status-lobby {
+      background: rgba(243, 244, 246, 0.9);
+      border-color: rgba(209, 213, 219, 0.9);
+      color: #374151;
+    }
+
+    .mm-main {
+      flex: 1;
+      display: flex;
+      gap: 18px;
+      overflow: hidden;
+    }
+
+    /* 左側：玩家資訊 + Quick Play / Create Room */
+    .mm-left {
+      flex: 0 0 260px;
+      background: rgba(249, 250, 251, 0.9);
+      border-radius: 18px;
+      padding: 14px 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      border: 1px solid rgba(209, 213, 219, 0.9);
+    }
+
+    .mm-player-card {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .mm-player-name {
+      font-weight: 600;
+      font-size: 14px;
+      color: #111827;
+    }
+
+    .mm-player-meta {
+      font-size: 11px;
+      color: #4b5563;
+      line-height: 1.4;
+    }
+
+    .mm-room-info-box {
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(243, 244, 246, 0.95);
+      border: 1px solid rgba(209, 213, 219, 0.9);
+      font-size: 11px;
+      color: #c9d0ff;
+      line-height: 1.5;
+    }
+
+    .mm-room-info-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: #6b7280;
+      margin-bottom: 4px;
+    }
+
+    .mm-label {
+      color: #6b7280;
+    }
+
+    .mm-actions {
+      margin-top: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .mm-btn {
+      border: none;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 10px 14px;
+      transition: background 0.15s ease, box-shadow 0.15s ease,
+        transform 0.05s ease, opacity 0.15s ease;
+    }
+
+    .mm-btn:active {
+      transform: translateY(1px);
+    }
+
+    .mm-btn-primary {
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      color: #fff;
+      box-shadow: 0 0 16px rgba(37, 99, 235, 0.4);
+    }
+
+    .mm-btn-primary:hover {
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      box-shadow: 0 0 22px rgba(37, 99, 235, 0.6);
+    }
+
+    .mm-btn-secondary {
+      background: rgba(243, 244, 246, 0.95);
+      color: #111827;
+      border: 1px solid rgba(209, 213, 219, 0.9);
+    }
+
+    .mm-btn-secondary:hover {
+      background: rgba(229, 231, 235, 0.95);
+    }
+
+    .mm-btn-ghost {
+      background: transparent;
+      color: #6b7280;
+      border: 1px dashed rgba(209, 213, 219, 0.9);
+    }
+
+    .mm-btn-ghost:hover {
+      background: rgba(243, 244, 246, 0.9);
+    }
+
+    .mm-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    /* 右側：房間列表 */
+    .mm-right {
+      flex: 1;
+      background: rgba(249, 250, 251, 0.96);
+      border-radius: 18px;
+      padding: 14px 14px 16px;
+      border: 1px solid rgba(209, 213, 219, 0.9);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .mm-right-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .mm-right-title {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #111827;
+    }
+
+    .mm-right-controls {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .mm-search {
+      padding: 6px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(209, 213, 219, 0.9);
+      background: rgba(255, 255, 255, 0.95);
+      color: #111827;
+      font-size: 11px;
+      min-width: 120px;
+    }
+
+    .mm-refresh {
+      font-size: 11px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.9);
+      background: transparent;
+      color: #4b5563;
+      cursor: pointer;
+    }
+
+    .mm-refresh:hover {
+      background: rgba(229, 231, 235, 0.9);
+    }
+
+    .mm-room-list {
+      margin-top: 6px;
+      flex: 1;
+      border-radius: 12px;
+      background: radial-gradient(circle at top, rgba(255, 255, 255, 0.95) 0, rgba(243, 244, 246, 0.96) 60%);
+      padding: 8px 8px 10px;
+      overflow-y: auto;
+    }
+
+    .mm-room-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(209, 213, 219, 0.9);
+      margin-bottom: 8px;
+    }
+
+    .mm-room-card-info {
+      max-width: 70%;
+    }
+
+    .mm-room-name {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 2px;
+      color: #111827;
+    }
+
+    .mm-room-meta {
+      font-size: 11px;
+      color: #4b5563;
+    }
+
+    .mm-room-tags {
+      margin-top: 2px;
+      font-size: 10px;
+      color: #6b7280;
+      opacity: 0.8;
+    }
+
+    .mm-room-btn {
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: #2563eb;
+      color: #fff;
+      transition: background 0.15s ease;
+    }
+
+    .mm-room-btn:hover {
+      background: #1d4ed8;
+    }
+
+    .mm-room-empty {
+      font-size: 11px;
+      color: #6b7280;
+      text-align: center;
+      padding: 20px 6px;
+      opacity: 0.8;
+    }
+
+    /* 下方 Debug bar */
+    .mm-footer {
+      margin-top: 12px;
+      font-size: 10px;
+      color: #6b7280;
+      display: flex;
+      justify-content: space-between;
+      opacity: 0.85;
+    }
+
+    @media (max-width: 900px) {
+      .mm-panel {
+        height: auto;
+      }
+      .mm-main {
+        flex-direction: column;
+      }
+      .mm-left {
+        flex: 0 0 auto;
+        order: 2;
+      }
+      .mm-right {
+        order: 1;
+        height: 260px;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .mm-panel {
+        padding: 12px 14px;
+        border-radius: 18px;
+      }
+      .mm-title {
+        font-size: 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="mm-overlay">
+    <div class="mm-panel">
+      <div class="mm-header">
+        <div class="mm-title-block">
+          <h1 class="mm-title">Battle Arena Lobby</h1>
+          <div class="mm-subtitle">Join a room or start a new match</div>
+        </div>
+        <!-- 依狀態切換：mm-status-lobby / host / member -->
+        <div class="mm-status-pill mm-status-lobby">In Lobby</div>
+      </div>
+
+      <div class="mm-main">
+        <!-- 左：玩家卡 + 目前房間 + 按鈕 -->
+        <div class="mm-left">
+          <div class="mm-player-card">
+            <div class="mm-player-name">PlayerName#1234</div>
+            <div class="mm-player-meta">
+              Session ID: xxxxx-xxxxx<br />
+              Region: Asia / Matchmaking
+            </div>
+          </div>
+
+          <div class="mm-room-info-box">
+            <div class="mm-room-info-title">Current Room</div>
+            <!-- 無房間時 -->
+            <!-- <div>No room joined. Create or join one.</div> -->
+
+            <!-- 有房間時，這一段替換掉上面 -->
+            <div><span class="mm-label">Name:</span> Room-12345</div>
+            <div><span class="mm-label">Players:</span> 2 / 4</div>
+            <div><span class="mm-label">Role:</span> Host</div>
+          </div>
+
+          <div class="mm-actions">
+            <button class="mm-btn mm-btn-secondary">
+              Create Room
+            </button>
+            <button class="mm-btn mm-btn-ghost" disabled>
+              Leave Room
+            </button>
+          </div>
+        </div>
+
+        <!-- 右：房間列表 -->
+        <div class="mm-right">
+          <div class="mm-right-header">
+            <div class="mm-right-title">Available Rooms</div>
+            <div class="mm-right-controls">
+              <input
+                class="mm-search"
+                type="text"
+                placeholder="Search room..."
+              />
+              <button class="mm-refresh">Refresh</button>
+            </div>
+          </div>
+
+          <div class="mm-room-list">
+            <!-- 有房間的樣子 -->
+            <div class="mm-room-card">
+              <div class="mm-room-card-info">
+                <div class="mm-room-name">Fun Arena #1</div>
+                <div class="mm-room-meta">Players: 3 / 4</div>
+                <div class="mm-room-tags">Mode: 2v2 • Region: Asia</div>
+              </div>
+              <button class="mm-room-btn">Join</button>
+            </div>
+
+            <div class="mm-room-card">
+              <div class="mm-room-card-info">
+                <div class="mm-room-name">Beginner Lobby</div>
+                <div class="mm-room-meta">Players: 1 / 4</div>
+                <div class="mm-room-tags">Mode: 4v4 • Region: Global</div>
+              </div>
+              <button class="mm-room-btn">Join</button>
+            </div>
+
+            <!-- 如果沒房間，就改用這一段 -->
+            <!--
+            <div class="mm-room-empty">
+              No rooms available yet. Try creating one.
+            </div>
+            -->
+          </div>
+        </div>
+      </div>
+
+      <div class="mm-footer">
+        <div>Channel: lobby-xxxxxx</div>
+        <div>App ID: your-app-id • VIVERSE Matchmaking</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
