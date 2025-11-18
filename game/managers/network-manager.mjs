@@ -267,6 +267,36 @@ class NetworkManager extends pc.EventHandler {
     }
   }
 
+  /**
+   * Host 在正式呼叫 game.gameStart() 前，先透過 BattleGameManager 生成動態場景並廣播 map-config。
+   */
+  async startGameWithDynamicArena() {
+    if (!this.multiplayer.currentClient?.game?.gameStart) {
+      console.warn('🐹 Game module not ready, cannot start.');
+      return;
+    }
+
+    try {
+      const gmEntity = this.pcApp.root.findByTag('game-manager')[0];
+      const battleManager = gmEntity?.script?.battleGameManager;
+      if (
+        battleManager &&
+        typeof battleManager.generateAndBroadcastDynamicArena === 'function'
+      ) {
+        battleManager.generateAndBroadcastDynamicArena();
+      }
+    } catch (e) {
+      console.warn('🐹 Failed to generate dynamic arena before gameStart:', e);
+    }
+
+    try {
+      await this.multiplayer.currentClient.game.gameStart();
+    } catch (e) {
+      console.error('🐹 Failed to call game.gameStart:', e);
+      throw e;
+    }
+  }
+
   showGameStartButton() {
     if (!this.multiplayer.currentClient?.game?.gameStart) {
       console.warn('🐹 Game module not ready, cannot show Game Start button.');
@@ -299,12 +329,11 @@ class NetworkManager extends pc.EventHandler {
         btn.disabled = true;
         btn.textContent = 'Waiting...';
         try {
-          // 由 Host 在按 Game Start 時觸發 gameStart，
-          // 真正的地圖（障礙物 / 武器箱）廣播改由 BattleGameManager 在倒數結束時處理。
-          await this.multiplayer.currentClient.game.gameStart();
+          // 在正式 gameStart 前，先生成動態場景並廣播 map-config。
+          await this.startGameWithDynamicArena();
           // 按鈕保留，由倒數事件決定何時關閉
         } catch (e) {
-          console.error('🐹 Failed to call game.gameStart:', e);
+          console.error('🐹 Failed to call startGameWithDynamicArena:', e);
           btn.disabled = false;
           btn.textContent = 'Game Start';
         }

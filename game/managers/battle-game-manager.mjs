@@ -53,6 +53,7 @@ export class BattleGameManager extends Script {
 
     this.players = new Map();
     this.localPlayer = null;
+    this._arenaGenerated = false;
 
     if (this.network) {
       this.setupNetworkEvents();
@@ -174,12 +175,6 @@ export class BattleGameManager extends Script {
     if (this.countdownLastShown !== currentInt) {
       this.countdownLastShown = currentInt;
       this.showCountdownUI(currentInt);
-
-      // 當倒數「第一次」進入 0（GO! 瞬間）且自己是房主時：
-      // 產生障礙物 / 武器箱，並將 mapConfig 廣播給所有人。
-      if (currentInt === 0 && this.isRoomLeader()) {
-        this.generateAndBroadcastDynamicArena();
-      }
     }
   }
 
@@ -322,6 +317,13 @@ export class BattleGameManager extends Script {
    */
   generateAndBroadcastDynamicArena() {
     if (!this.network) return;
+    if (!this.isRoomLeader()) return;
+
+    // 同一場遊戲只生成一次動態場景，避免重複廣播 map-config
+    if (this._arenaGenerated) {
+      return;
+    }
+    this._arenaGenerated = true;
 
     let arenaGenerator = this.entity.script?.arenaGenerator;
     if (!arenaGenerator) {
@@ -583,6 +585,7 @@ export class BattleGameManager extends Script {
 
   endMatch(reason) {
     this.gameState.phase = "finished";
+    this._arenaGenerated = false;
     this.hideCountdownUI();
     this.hideGameTimeUI();
     this.hideStatusHUD();
@@ -597,6 +600,7 @@ export class BattleGameManager extends Script {
    */
   resetToLobby() {
     this.gameState.phase = "waiting";
+    this._arenaGenerated = false;
     this.hideCountdownUI();
     this.hideGameTimeUI();
     this.hideStatusHUD();

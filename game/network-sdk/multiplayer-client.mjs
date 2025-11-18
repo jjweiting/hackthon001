@@ -115,7 +115,12 @@ class MultiPlayerClient {
         try {
           if (typeof this.manager.isGameMaster === "function" && this.manager.isGameMaster()) {
             console.log("🦊 game/onPlayerAllReady -> master calling gameStart()");
-            game.gameStart();
+            // 由 NetworkManager 控制：先生成動態場景並廣播 map-config，再正式啟動 gameStart。
+            if (typeof this.manager.startGameWithDynamicArena === "function") {
+              this.manager.startGameWithDynamicArena();
+            } else {
+              game.gameStart();
+            }
           }
         } catch (e) {
           console.warn("🦊 Failed to auto call gameStart onPlayerAllReady:", e);
