@@ -42,6 +42,22 @@ class MultiPlayerClient {
       });
     }
 
+    // 等待其他玩家加入（顯示目前已加入 / 未加入）
+    if (typeof game.onWaitForPlayer === "function") {
+      game.onWaitForPlayer((data) => {
+        console.log("🦊 game/wait_for_player/ current_player_ids:", data.player_ids);
+        this.manager.fire("game-wait-for-player", data);
+      });
+    }
+
+    // 所有玩家都準備好了（由 SDK 判定）
+    if (typeof game.onPlayerAllReady === "function") {
+      game.onPlayerAllReady((data) => {
+        console.log("🦊 game/onPlayerAllReady:", data);
+        this.manager.fire("game-player-all-ready", data);
+      });
+    }
+
     // 倒數結束，正式進入遊戲
     if (typeof game.onCountdownToEnd === "function") {
       game.onCountdownToEnd((data) => {
@@ -73,11 +89,37 @@ class MultiPlayerClient {
       });
     }
 
+    // 遊戲 master 更新通知（由 SDK 決定誰是 master）
+    if (typeof game.onMasterNotify === "function") {
+      game.onMasterNotify((data) => {
+        console.log("🦊 game/master_notify/ master_user:", data.master_user);
+        this.manager.fire("game-master-notify", data);
+      });
+    }
+
     // 錯誤通知
     if (typeof game.onErrorNotify === "function") {
       game.onErrorNotify((data) => {
         console.warn("🦊 game/onErrorNotify:", data);
         this.manager.fire("game-error", data);
+      });
+    }
+
+    // 所有玩家都 ready 後，master 直接啟動 gameStart
+    if (typeof game.onPlayerAllReady === "function") {
+      game.onPlayerAllReady((data) => {
+        console.log("🦊 game/onPlayerAllReady:", data);
+        this.manager.fire("game-player-all-ready", data);
+
+        // 只有 master 呼叫 gameStart，避免重複觸發
+        try {
+          if (typeof this.manager.isGameMaster === "function" && this.manager.isGameMaster()) {
+            console.log("🦊 game/onPlayerAllReady -> master calling gameStart()");
+            game.gameStart();
+          }
+        } catch (e) {
+          console.warn("🦊 Failed to auto call gameStart onPlayerAllReady:", e);
+        }
       });
     }
   }

@@ -39,6 +39,9 @@ class NetworkManager extends pc.EventHandler {
       this.viverseApp.once("player:ready", this.addLocalPlayerScript, this);
     }
 
+    // game module master（由 onMasterNotify 給定），預設退回到 created_by_me
+    this.gameMasterUserId = null;
+
     this.addEventListeners();
   }
 
@@ -95,6 +98,32 @@ class NetworkManager extends pc.EventHandler {
     this.on('game-error', (data) => {
       this.handleGameError(data);
     });
+
+    // 等待玩家加入（顯示目前已加入 / 尚未加入人數）
+    this.on('game-wait-for-player', (data) => {
+      this.handleWaitForPlayer(data);
+    });
+
+    // 所有玩家在遊戲房內都 ready（由 MultiplayerClient 轉發）
+    this.on('game-player-all-ready', (data) => {
+      console.log('🐯 NetworkManager game-player-all-ready:', data, 'currentRoom:', this.currentRoom);
+      // 人到齊後隱藏等待提示，gameStart 由 MultiplayerClient + master 自動觸發
+      this.hideWaitForPlayerOverlay();
+    });
+
+    // SDK 通知誰是 master，用來決定誰可以觸發地圖/遊戲邏輯
+    this.on('game-master-notify', (data) => {
+      console.log('🐯 NetworkManager game-master-notify:', data);
+      this.gameMasterUserId = data?.master_user || null;
+    });
+  }
+
+  // 是否為 game master：優先使用 SDK master_user，否則退回到 matchmaking host（created_by_me）
+  isGameMaster() {
+    // 目前 SDK 的 master_user 使用的是內部 user id，
+    // 與這裡自行產生的 sessionId 不同，因此暫時以 matchmaking 的房主作為 master。
+    // 若未來能取得對應的 user id，再改用 gameMasterUserId 比對。
+    return !!this.currentRoom?.created_by_me;
   }
 
   handleTransformUpdate(message) {
@@ -363,10 +392,9 @@ class NetworkManager extends pc.EventHandler {
       }
 
       // 再透過 map-init 廣播 seed，讓所有玩家用相同 seed 建立相同的基礎場景。
-      // 並且每秒重送一次，最多 10 次，避免在切換 channel / 建立 client 過程中被吃掉。
+      // 並且每秒重送一次，避免在切換 channel / 建立 client 過程中被吃掉。
       this.scheduleMapInitBroadcast(seed);
-
-      this.showGameStartButton();
+      // Game Start 按鈕改由 game-player-all-ready 事件控制顯示
     }
   }
 
@@ -456,6 +484,55 @@ class NetworkManager extends pc.EventHandler {
     // 若玩家尚未全數準備好，保持或重新顯示 Game Start 按鈕
     if (data?.error_type === 'player_not_all_ready') {
       this.showGameStartButton();
+    }
+  }
+
+  handleWaitForPlayer(data) {
+    const playerIds = data?.player_ids || {};
+    const joinedCount = Object.keys(playerIds).length;
+
+    // 期望人數：優先用 matchmaking 的 room actors 長度
+    const expected =
+      (this.currentRoom && this.currentRoom.actors && this.currentRoom.actors.length) ||
+      joinedCount;
+
+    const remaining = Math.max(0, expected - joinedCount);
+    this.showWaitForPlayerOverlay(joinedCount, expected, remaining);
+  }
+
+  showWaitForPlayerOverlay(joined, expected, remaining) {
+    let el = document.getElementById("battle-wait-players");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "battle-wait-players";
+      el.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 16px 28px;
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.75);
+        border: 2px solid #ffffff;
+        color: #ffffff;
+        font-size: 18px;
+        font-weight: bold;
+        text-align: center;
+        z-index: 1003;
+        box-shadow: 0 0 16px rgba(0, 0, 0, 0.6);
+      `;
+      document.body.appendChild(el);
+    }
+
+    const remainingText =
+      remaining > 0 ? `，還差 ${remaining} 人` : "，人數已到齊，準備開始...";
+    el.textContent = `目前已加入 ${joined} / ${expected} 人${remainingText}`;
+  }
+
+  hideWaitForPlayerOverlay() {
+    const el = document.getElementById("battle-wait-players");
+    if (el && el.parentNode) {
+      el.parentNode.removeChild(el);
     }
   }
 }
