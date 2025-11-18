@@ -120,29 +120,37 @@ export class ArenaGenerator extends Script {
     const obstacles = [];
     const weaponBoxes = [];
 
-    this.generatedEntities.forEach((ent) => {
+    // 為了兼容「由 ArenaGenerator 產生」與「場景中原本就存在」的物件，
+    // 這裡改成直接透過 tag 掃描整個場景，而不是只看 generatedEntities。
+
+    const obstacleEntities = this.app.root.findByTag("obstacle") || [];
+    obstacleEntities.forEach((ent) => {
+      if (!ent || ent.destroyed) return;
+      if (!ent.render) return;
+
+      const pos = ent.getPosition();
+      const scale = ent.getLocalScale();
+      const euler = ent.getEulerAngles();
+      obstacles.push({
+        type: ent.render?.type || "box",
+        position: { x: pos.x, y: pos.y, z: pos.z },
+        scale: { x: scale.x, y: scale.y, z: scale.z },
+        rotationY: euler.y || 0
+      });
+    });
+
+    const weaponBoxEntities = this.app.root.findByTag("weapon-box") || [];
+    weaponBoxEntities.forEach((ent) => {
       if (!ent || ent.destroyed) return;
 
-      if (ent.tags?.has("obstacle")) {
-        const pos = ent.getPosition();
-        const scale = ent.getLocalScale();
-        const euler = ent.getEulerAngles();
-        obstacles.push({
-          type: ent.render?.type || "box",
-          position: { x: pos.x, y: pos.y, z: pos.z },
-          scale: { x: scale.x, y: scale.y, z: scale.z },
-          rotationY: euler.y || 0
-        });
-      } else if (ent.tags?.has("weapon-box")) {
-        const pos = ent.getPosition();
-        const pickup = ent.script?.weaponPickup;
-        weaponBoxes.push({
-          name: ent.name,
-          weaponType: pickup?.weaponType || "rifle",
-          spawnIndex: pickup?.spawnIndex ?? -1,
-          position: { x: pos.x, y: pos.y, z: pos.z }
-        });
-      }
+      const pos = ent.getPosition();
+      const pickup = ent.script?.weaponPickup;
+      weaponBoxes.push({
+        name: ent.name,
+        weaponType: pickup?.weaponType || "rifle",
+        spawnIndex: pickup?.spawnIndex ?? -1,
+        position: { x: pos.x, y: pos.y, z: pos.z }
+      });
     });
 
     const spawnPoints = {
@@ -462,11 +470,11 @@ export class ArenaGenerator extends Script {
     const weaponTypes = ["shotgun", "rifle", "sniper", "rocket"];
 
     this.weaponSpawnPoints.forEach((spawn, index) => {
-      if (rng.random() > 0.5) {
-        const weaponType =
-          weaponTypes[Math.floor(rng.random() * weaponTypes.length)];
-        this.spawnWeaponBox(index, weaponType);
-      }
+      // 為了讓所有玩家更容易看到武器箱，同步起來也比較直覺：
+      // 目前改成「每個 spawn 點都放一個武器箱」，武器種類仍然隨機。
+      const weaponType =
+        weaponTypes[Math.floor(rng.random() * weaponTypes.length)];
+      this.spawnWeaponBox(index, weaponType);
     });
   }
 

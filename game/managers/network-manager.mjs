@@ -270,30 +270,8 @@ class NetworkManager extends pc.EventHandler {
         btn.disabled = true;
         btn.textContent = 'Waiting...';
         try {
-          // 由 Host 在按 Game Start 時匯出 mapConfig 並廣播，讓所有玩家用一致配置生成地圖
-          const gmEntity = this.pcApp.root.findByTag('game-manager')[0];
-          const battleManager = gmEntity?.script?.battleGameManager;
-          const arenaGenerator = battleManager?.entity?.script?.arenaGenerator;
-
-          let mapConfig = null;
-          if (arenaGenerator && typeof arenaGenerator.exportMapConfig === 'function') {
-            mapConfig = arenaGenerator.exportMapConfig();
-          } else if (battleManager && typeof battleManager.generateArena === 'function') {
-            // 若尚未生成地圖，先生成一版再匯出
-            const seed = Math.floor(Math.random() * 1e9) || Date.now();
-            battleManager.generateArena(seed);
-            const ag = battleManager.entity.script?.arenaGenerator;
-            if (ag && typeof ag.exportMapConfig === 'function') {
-              mapConfig = ag.exportMapConfig();
-            }
-          }
-
-          if (mapConfig) {
-            this.sendMessage('map-config', { mapConfig });
-          } else {
-            console.warn('🐹 Unable to export mapConfig, arenaGenerator not ready.');
-          }
-
+          // 由 Host 在按 Game Start 時觸發 gameStart，
+          // 真正的地圖（障礙物 / 武器箱）廣播改由 BattleGameManager 在倒數結束時處理。
           await this.multiplayer.currentClient.game.gameStart();
           // 按鈕保留，由倒數事件決定何時關閉
         } catch (e) {
@@ -373,24 +351,53 @@ class NetworkManager extends pc.EventHandler {
     await this.enterChannel(this.currentRoom.id);
     console.log('🐯 Matchmaking game started, re-entered channel:', this.currentRoom.id);
 
-    // 只有房主在「遊戲房」內看到 Game Start 按鈕，點擊後才觸發 gameStart
     const isHost = this.currentRoom.created_by_me;
     if (isHost) {
       // 房主一進遊戲房就先產生「基礎競技場」（地板 / 牆 / 出生點），但尚未產生障礙物與武器箱。
-      // 透過 map-init 廣播 seed，讓所有玩家用相同 seed 建立相同的基礎場景。
       const seed = Math.floor(Math.random() * 1e9) || Date.now();
-      this.sendMessage('map-init', { seed });
-
-      // 伺服器未必會把 map-init 再回傳給自己，因此這裡直接通知 BattleGameManager，
-      // 讓房主本地也用同一個 seed 生成基礎競技場。
+      // 先在本地建立基礎場景
       const gmEntity = this.pcApp.root.findByTag('game-manager')[0];
       const battleManager = gmEntity?.script?.battleGameManager;
       if (battleManager && typeof battleManager.handleMapInit === 'function') {
         battleManager.handleMapInit({ seed });
       }
 
+      // 再透過 map-init 廣播 seed，讓所有玩家用相同 seed 建立相同的基礎場景。
+      // 並且每秒重送一次，最多 10 次，避免在切換 channel / 建立 client 過程中被吃掉。
+      this.scheduleMapInitBroadcast(seed);
+
       this.showGameStartButton();
     }
+  }
+
+  /**
+   * Host 在切到新 channel 並建立 multiplayer client 後，
+   * 每秒送出一次 map-init（最多 10 次），讓後加入的玩家也能拿到 seed。
+   */
+  scheduleMapInitBroadcast(seed) {
+    if (this._mapInitInterval) {
+      clearInterval(this._mapInitInterval);
+      this._mapInitInterval = null;
+    }
+
+    let count = 0;
+    this._mapInitInterval = setInterval(() => {
+      // 若已離開 channel 或沒有 multiplayer client，就停止
+      if (!this.multiplayer?.currentClient || !this.currentChannel) {
+        clearInterval(this._mapInitInterval);
+        this._mapInitInterval = null;
+        return;
+      }
+
+      count += 1;
+      console.log('🐯 Host sent map-init with seed:', seed, 'count:', count);
+      this.sendMessage('map-init', { seed });
+
+      if (count >= 2) {
+        clearInterval(this._mapInitInterval);
+        this._mapInitInterval = null;
+      }
+    }, 1000);
   }
 
   handleRoomListUpdated(rooms) {

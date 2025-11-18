@@ -256,9 +256,11 @@ export class BattleGameManager extends Script {
 
     switch (type) {
       case "map-config":
+        console.log("Received map-config:", payload);
         this.handleMapConfig(payload);
         break;
       case "map-init":
+        console.log("Received map-init:", payload);
         this.handleMapInit(payload);
         break;
       case "player-shoot":
@@ -334,14 +336,63 @@ export class BattleGameManager extends Script {
 
     if (typeof arenaGenerator.generateDynamic === "function") {
       arenaGenerator.generateDynamic(seed);
+
+      // Debug: 檢查在 Host 端實際存在多少武器箱（透過 tag 掃描場景）
+      const weaponBoxEntities =
+        arenaGenerator.app.root.findByTag("weapon-box") || [];
+      console.log("[BattleGame] Host dynamic arena generated", {
+        seed,
+        generatedCount: arenaGenerator.generatedEntities?.length || 0,
+        weaponBoxCountInScene: weaponBoxEntities.length
+      });
     }
 
     if (typeof arenaGenerator.exportMapConfig === "function") {
       const mapConfig = arenaGenerator.exportMapConfig();
       if (mapConfig) {
-        this.network.sendMessage("map-config", { mapConfig });
+        console.log("[BattleGame] Host exportMapConfig summary", {
+          obstacleCount: mapConfig.obstacles?.length || 0,
+          weaponBoxCount: mapConfig.weaponBoxes?.length || 0
+        });
+
+        // host 端自己也先套用一次，確保走同一條重建流程
+        this.handleMapConfig({ mapConfig });
+        // 再透過 network 連續多次廣播給其他玩家（避免在切換 channel 期間被吃掉）
+        this.scheduleMapConfigBroadcast(mapConfig);
       }
     }
+  }
+
+  /**
+   * Host 在產生動態場景後，連續多次送出 map-config，
+   * 類似 map-init 的重送機制，避免在 client 剛連上 channel 時漏收。
+   */
+  scheduleMapConfigBroadcast(mapConfig) {
+    if (!this.network) return;
+
+    if (this._mapConfigInterval) {
+      clearInterval(this._mapConfigInterval);
+      this._mapConfigInterval = null;
+    }
+
+    let count = 0;
+    this._mapConfigInterval = setInterval(() => {
+      // 若網路已不存在，停止重送
+      if (!this.network) {
+        clearInterval(this._mapConfigInterval);
+        this._mapConfigInterval = null;
+        return;
+      }
+
+      count += 1;
+      console.log("[BattleGame] Host broadcast map-config, count:", count);
+      this.network.sendMessage("map-config", { mapConfig });
+
+      if (count >= 2) {
+        clearInterval(this._mapConfigInterval);
+        this._mapConfigInterval = null;
+      }
+    }, 1000);
   }
 
   handlePlayerShoot(message) {
@@ -396,14 +447,38 @@ export class BattleGameManager extends Script {
 
   handleWeaponPickup(message) {
     if (!this.network) return;
-    const { playerId, weaponType, boxName } = message;
+    const { playerId, weaponType, boxName, spawnIndex } = message;
 
-    // 所有 client：移除對應的武器箱
+    // 所有 client：嘗試移除對應的武器箱
+    let removed = false;
+
+    // 優先用名稱移除（由 map-config 重建的武器箱名稱應一致）
     if (boxName) {
       const boxEntity = this.app.root.findByName(boxName);
       if (boxEntity && !boxEntity.destroyed) {
         boxEntity.destroy();
+        removed = true;
       }
+    }
+
+    // 若名稱無法對上，再用 spawnIndex + tag 搜尋
+    if (!removed && typeof spawnIndex === "number" && spawnIndex >= 0) {
+      const candidates = this.app.root.findByTag("weapon-box") || [];
+      candidates.forEach((ent) => {
+        if (removed || !ent || ent.destroyed) return;
+        const pickup = ent.script?.weaponPickup;
+        if (pickup && pickup.spawnIndex === spawnIndex) {
+          ent.destroy();
+          removed = true;
+        }
+      });
+    }
+
+    if (!removed) {
+      console.warn("[BattleGame] Failed to remove weapon box", {
+        boxName,
+        spawnIndex
+      });
     }
 
     // 只有撿到的人更新自己的當前武器
