@@ -89,6 +89,152 @@ export class ArenaGenerator extends Script {
     this.createInitialWeaponBoxes(rng);
   }
 
+  /**
+   * 匯出目前場景的配置，供 Host 廣播給所有玩家用來重建地圖
+   */
+  exportMapConfig() {
+    const obstacles = [];
+    const weaponBoxes = [];
+
+    this.generatedEntities.forEach((ent) => {
+      if (!ent || ent.destroyed) return;
+
+      if (ent.tags?.has("obstacle")) {
+        const pos = ent.getPosition();
+        const scale = ent.getLocalScale();
+        const euler = ent.getEulerAngles();
+        obstacles.push({
+          type: ent.render?.type || "box",
+          position: { x: pos.x, y: pos.y, z: pos.z },
+          scale: { x: scale.x, y: scale.y, z: scale.z },
+          rotationY: euler.y || 0
+        });
+      } else if (ent.tags?.has("weapon-box")) {
+        const pos = ent.getPosition();
+        const pickup = ent.script?.weaponPickup;
+        weaponBoxes.push({
+          name: ent.name,
+          weaponType: pickup?.weaponType || "rifle",
+          spawnIndex: pickup?.spawnIndex ?? -1,
+          position: { x: pos.x, y: pos.y, z: pos.z }
+        });
+      }
+    });
+
+    const spawnPoints = {
+      A: this.spawnPoints.A.map((v) => ({ x: v.x, y: v.y, z: v.z })),
+      B: this.spawnPoints.B.map((v) => ({ x: v.x, y: v.y, z: v.z }))
+    };
+
+    return {
+      obstacles,
+      weaponBoxes,
+      spawnPoints
+    };
+  }
+
+  /**
+   * 依照 Host 廣播的 mapConfig 重建場景，避免各端自己亂數生成造成不一致
+   */
+  generateFromConfig(mapConfig) {
+    if (!mapConfig) return;
+
+    this.cleanup();
+
+    // 地板與外牆為固定結構，可直接重建
+    this.createFloor();
+    this.createWalls();
+
+    // 重建 spawnPoints 與可視化 marker
+    this.spawnPoints.A.length = 0;
+    this.spawnPoints.B.length = 0;
+    const cfgSpawns = mapConfig.spawnPoints || {};
+    (cfgSpawns.A || []).forEach((p) => {
+      const v = new pc.Vec3(p.x, p.y, p.z);
+      this.spawnPoints.A.push(v);
+    });
+    (cfgSpawns.B || []).forEach((p) => {
+      const v = new pc.Vec3(p.x, p.y, p.z);
+      this.spawnPoints.B.push(v);
+    });
+
+    if (this.enableDebugMarkers) {
+      this.spawnPoints.A.forEach((v, i) =>
+        this.createSpawnMarker("A", i, v.x, v.z)
+      );
+      this.spawnPoints.B.forEach((v, i) =>
+        this.createSpawnMarker("B", i, v.x, v.z)
+      );
+    }
+
+    // 重建障礙物
+    (mapConfig.obstacles || []).forEach((o, index) => {
+      const obstacle = new pc.Entity(`arena-obstacle-${index}`);
+      obstacle.addComponent("render", { type: o.type || "box" });
+
+      const scale = o.scale || { x: 2, y: 2, z: 2 };
+      obstacle.setLocalScale(scale.x, scale.y, scale.z);
+
+      const pos = o.position || { x: 0, y: 1, z: 0 };
+      obstacle.setPosition(pos.x, pos.y, pos.z);
+
+      const rotY = o.rotationY || 0;
+      obstacle.setRotation(
+        new pc.Quat().setFromEulerAngles(0, rotY, 0)
+      );
+
+      obstacle.addComponent("collision", {
+        type: o.type === "cylinder" ? "cylinder" : "box",
+        halfExtents: new pc.Vec3(scale.x / 2, scale.y / 2, scale.z / 2)
+      });
+      obstacle.addComponent("rigidbody", {
+        type: "static"
+      });
+
+      const material = new pc.StandardMaterial();
+      material.diffuse = new pc.Color(0.5, 0.5, 0.5);
+      material.update();
+      obstacle.render.material = material;
+
+      obstacle.tags.add("dynamic", "arena", "obstacle");
+      this.app.root.addChild(obstacle);
+      this.generatedEntities.push(obstacle);
+    });
+
+    // 重建武器箱
+    (mapConfig.weaponBoxes || []).forEach((w) => {
+      const box = new pc.Entity(w.name || "weapon-box");
+      box.addComponent("render", { type: "box" });
+      box.setLocalScale(0.8, 0.8, 0.8);
+
+      const pos = w.position || { x: 0, y: 1, z: 0 };
+      box.setPosition(pos.x, pos.y, pos.z);
+
+      const material = new pc.StandardMaterial();
+      material.diffuse = new pc.Color(0.9, 0.8, 0.1);
+      material.emissive = material.diffuse;
+      material.update();
+      box.render.material = material;
+
+      box.addComponent("collision", {
+        type: "box",
+        halfExtents: new pc.Vec3(0.4, 0.4, 0.4),
+        axis: 1,
+        isTrigger: true
+      });
+
+      box.tags.add("dynamic", "arena", "weapon-box");
+
+      box.addComponent("script");
+      const pickup = box.script.create(WeaponPickup);
+      pickup.weaponType = w.weaponType || "rifle";
+      pickup.spawnIndex = w.spawnIndex ?? -1;
+
+      this.app.root.addChild(box);
+      this.generatedEntities.push(box);
+    });
+  }
+
   createFloor() {
     const floor = new pc.Entity("arena-floor");
     floor.addComponent("render", {

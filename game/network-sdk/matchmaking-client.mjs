@@ -121,10 +121,15 @@ class MatchmakingClient {
   leaveRoom() {
     if (!this.currentClient) return;
 
+    // 遊戲開始後 SDK 端可能認為「不在房間裡」，但 currentRoom 還保留上一間
+    // 為了回到 Lobby 時狀態乾淨，不論 isJoinedToRoom 結果如何，都把 currentRoom 清掉
     if (this.currentClient.isJoinedToRoom()) {
-      return this.currentClient.leaveRoom();
+      const p = this.currentClient.leaveRoom();
+      this.currentClient.currentRoom = null;
+      return p;
     }
 
+    this.currentClient.currentRoom = null;
     return Promise.resolve();
   }
 }

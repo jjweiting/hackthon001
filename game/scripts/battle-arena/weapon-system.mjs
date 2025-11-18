@@ -15,7 +15,7 @@ export class WeaponSystem extends Script {
       pistol: {
         name: "Pistol",
         damage: 15,
-        fireRate: 0.4,
+        fireRate: 0.5, // 每 0.5 秒一發
         range: 60
       },
       shotgun: {
@@ -51,4 +51,3 @@ export class WeaponSystem extends Script {
     return this.weapons[type] || this.weapons[this.defaultWeapon];
   }
 }
-

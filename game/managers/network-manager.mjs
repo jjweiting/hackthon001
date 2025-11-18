@@ -14,11 +14,23 @@ class NetworkManager extends pc.EventHandler {
     this.sessionId = `player-session-${crypto.randomUUID()}`;
     this.actorEntityMap = new Map(); 
  
+    // 透過 query string 切換快速遊戲模式（略過 Lobby / Matchmaking）
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const mode = params.get('mode');
+      // 支援 ?mode=game 或 ?mode=room 兩種寫法
+      this.isQuickGameMode = mode === 'game';
+    } catch (e) {
+      this.isQuickGameMode = false;
+    }
+
     this.multiplayer = new MultiPlayerClient(this, appId);
     this.currentChannel = null;
 
     this.matchmaking = new MatchmakingClient(this, appId, debug);
-    this.matchmaking.createClient();
+    if (!this.isQuickGameMode) {
+      this.matchmaking.createClient();
+    }
     
     const playerEntity = this.viverseApp.systems.localPlayer?.playerEntity;
     if(playerEntity){
@@ -60,6 +72,8 @@ class NetworkManager extends pc.EventHandler {
         case 'score-update':
         case 'weapon-pickup':
         case 'team-assignment':
+        case 'map-init':
+        case 'map-config':
           break;
         default:
           console.warn('🐹 Unknown message type:', type);
@@ -101,6 +115,22 @@ class NetworkManager extends pc.EventHandler {
           animationState: payload.animation || 'idle',
         },
       });
+
+      // 為遠端玩家建立簡單的碰撞體，讓射線可以擊中
+      if (!entity.collision) {
+        entity.addComponent('collision', {
+          type: 'capsule',
+          radius: 0.4,
+          height: 1.6,
+          axis: 1
+        });
+      }
+      if (!entity.rigidbody) {
+        entity.addComponent('rigidbody', {
+          type: 'kinematic'
+        });
+      }
+
       this.pcApp.root.addChild(entity);
       this.actorEntityMap.set(player, entity);
     }
@@ -132,6 +162,80 @@ class NetworkManager extends pc.EventHandler {
   sendMessage(type, payload) {
     const sessionId = this.sessionId;
     this.multiplayer.sendMessage(sessionId, { type, payload });
+  }
+
+  showLeaveGameButton() {
+    let btn = document.getElementById('battle-leave-game-btn');
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.id = 'battle-leave-game-btn';
+      btn.textContent = 'Leave Game';
+      btn.style.cssText = `
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        padding: 8px 16px;
+        font-size: 14px;
+        font-weight: bold;
+        color: #ffffff;
+        background: #ff534b;
+        border: 2px solid #ffffff;
+        border-radius: 6px;
+        cursor: pointer;
+        z-index: 1004;
+        box-shadow: 0 0 8px rgba(0, 0, 0, 0.6);
+      `;
+
+      btn.onclick = () => {
+        btn.disabled = true;
+        btn.textContent = 'Leaving...';
+
+        // 優先透過內部流程回到 Lobby，不重新載入頁面
+        (async () => {
+          try {
+            // 先請 BattleGameManager 清掉戰鬥場景與 UI
+            const gmEntity = this.pcApp.root.findByTag('game-manager')[0];
+            const battleManager = gmEntity?.script?.battleGameManager;
+            if (battleManager && typeof battleManager.resetToLobby === 'function') {
+              battleManager.resetToLobby();
+            }
+
+            // 離開遊戲頻道，斷開目前的 multiplayer client
+            await this.leaveChannel();
+
+            // 如果目前是 quick game 模式，改回正常模式並建立 matchmaking client
+            if (this.isQuickGameMode) {
+              this.isQuickGameMode = false;
+              await this.matchmaking.createClient();
+            }
+
+            // 進入 Lobby 頻道
+            await this.enterLobby();
+
+            if (btn && btn.parentNode) {
+              btn.parentNode.removeChild(btn);
+            }
+          } catch (e) {
+            console.error('🐹 Failed to enter lobby from leave button', e);
+            btn.disabled = false;
+            btn.textContent = 'Leave Game';
+          }
+        })();
+      };
+
+      document.body.appendChild(btn);
+    } else {
+      btn.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Leave Game';
+    }
+  }
+
+  hideLeaveGameButton() {
+    const btn = document.getElementById('battle-leave-game-btn');
+    if (btn && btn.parentNode) {
+      btn.parentNode.removeChild(btn);
+    }
   }
 
   showGameStartButton() {
@@ -166,17 +270,29 @@ class NetworkManager extends pc.EventHandler {
         btn.disabled = true;
         btn.textContent = 'Waiting...';
         try {
-          // 由 Host 在按 Game Start 時決定 seed 並廣播給所有玩家，用於同步競技場
-          const seed = Math.floor(Math.random() * 1e9) || Date.now();
-          this.sendMessage('map-init', { seed });
+          // 由 Host 在按 Game Start 時匯出 mapConfig 並廣播，讓所有玩家用一致配置生成地圖
+          const gmEntity = this.pcApp.root.findByTag('game-manager')[0];
+          const battleManager = gmEntity?.script?.battleGameManager;
+          const arenaGenerator = battleManager?.entity?.script?.arenaGenerator;
 
-           // 本機端（房主）直接套用相同 seed 生成競技場，
-           // 避免依賴 general channel 是否會收到自己的訊息
-           const gmEntity = this.pcApp.root.findByTag('game-manager')[0];
-           const battleManager = gmEntity?.script?.battleGameManager;
-           if (battleManager && typeof battleManager.handleMapInit === 'function') {
-             battleManager.handleMapInit({ seed });
-           }
+          let mapConfig = null;
+          if (arenaGenerator && typeof arenaGenerator.exportMapConfig === 'function') {
+            mapConfig = arenaGenerator.exportMapConfig();
+          } else if (battleManager && typeof battleManager.generateArena === 'function') {
+            // 若尚未生成地圖，先生成一版再匯出
+            const seed = Math.floor(Math.random() * 1e9) || Date.now();
+            battleManager.generateArena(seed);
+            const ag = battleManager.entity.script?.arenaGenerator;
+            if (ag && typeof ag.exportMapConfig === 'function') {
+              mapConfig = ag.exportMapConfig();
+            }
+          }
+
+          if (mapConfig) {
+            this.sendMessage('map-config', { mapConfig });
+          } else {
+            console.warn('🐹 Unable to export mapConfig, arenaGenerator not ready.');
+          }
 
           await this.multiplayer.currentClient.game.gameStart();
           // 按鈕保留，由倒數事件決定何時關閉
@@ -203,6 +319,17 @@ class NetworkManager extends pc.EventHandler {
   }
 
   async enterLobby() {
+    // 快速遊戲模式：略過 Lobby，直接進入共用遊戲頻道
+    if (this.isQuickGameMode) {
+      await this.leaveChannel();
+      const channelId = `battle-game-${this.appId || "default"}`;
+      console.log('🦊 Quick game mode, enter game channel:', channelId);
+      await this.enterChannel(channelId);
+      // 直接顯示 Game Start 按鈕，讓任一玩家可觸發 gameStart
+      this.showGameStartButton();
+      return;
+    }
+
     const promises = [];
     promises.push(this.leaveChannel());
     promises.push(this.matchmaking.leaveRoom());
@@ -213,7 +340,9 @@ class NetworkManager extends pc.EventHandler {
     if (hasLobbyChannel) {
       const name = `lobbyyy${this.appId}`;
       console.log('🦊 Lobby', name);
-      this.enterChannel(name);
+      await this.enterChannel(name);
+      // 通知 UI / 其他系統已回到 Lobby
+      this.fire('entered-lobby');
     }
   }
 
@@ -302,7 +431,7 @@ class NetworkManager extends pc.EventHandler {
   }
 
   handleGameError(data) {
-    console.error('🐹 Game error:', data);
+    console.warn('🐹 Game error:', data);
 
     // 若玩家尚未全數準備好，保持或重新顯示 Game Start 按鈕
     if (data?.error_type === 'player_not_all_ready') {

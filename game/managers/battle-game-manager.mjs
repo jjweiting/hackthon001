@@ -202,6 +202,11 @@ export class BattleGameManager extends Script {
     if (this.localPlayer) {
       this.respawnPlayer(this.localPlayer);
     }
+
+    // 顯示離開遊戲按鈕
+    if (this.network && typeof this.network.showLeaveGameButton === "function") {
+      this.network.showLeaveGameButton();
+    }
   }
 
   updateMatchTimer(dt) {
@@ -244,6 +249,9 @@ export class BattleGameManager extends Script {
     const { type, payload, player } = message;
 
     switch (type) {
+      case "map-config":
+        this.handleMapConfig(payload);
+        break;
       case "map-init":
         this.handleMapInit(payload);
         break;
@@ -277,9 +285,26 @@ export class BattleGameManager extends Script {
     const { seed } = message;
     if (typeof seed !== "number") return;
 
-    // 所有玩家（包含房主）都用同一個 seed 生成競技場
+    // 保留舊的 seed 方式作為 fallback，但優先使用 map-config
     this.gameState.mapSeed = seed;
     this.generateArena(seed);
+  }
+
+  handleMapConfig(message) {
+    const { mapConfig } = message || {};
+    if (!mapConfig) return;
+
+    let arenaGenerator = this.entity.script?.arenaGenerator;
+    if (!arenaGenerator) {
+      if (!this.entity.script) {
+        this.entity.addComponent("script");
+      }
+      arenaGenerator = this.entity.script.create(ArenaGenerator);
+    }
+
+    if (typeof arenaGenerator.generateFromConfig === "function") {
+      arenaGenerator.generateFromConfig(mapConfig);
+    }
   }
 
   handlePlayerShoot(message) {
@@ -293,6 +318,12 @@ export class BattleGameManager extends Script {
     const { targetId, damage, shooterId } = message;
 
     if (targetId === this.network.sessionId) {
+      console.log("[BattleGame] local player hit", {
+        from: shooterId,
+        damage,
+        beforeHp: this.localPlayer.health
+      });
+
       this.localPlayer.health -= damage;
       this.showDamageEffect();
 
@@ -442,13 +473,44 @@ export class BattleGameManager extends Script {
     this.gameState.phase = "finished";
     this.hideCountdownUI();
     this.hideGameTimeUI();
+    this.hideStatusHUD();
+    if (this.network && typeof this.network.hideLeaveGameButton === "function") {
+      this.network.hideLeaveGameButton();
+    }
     this.showMatchResults(reason);
   }
 
-  update(dt) {
-    // 持續更新狀態 HUD（HP / Weapon / Score），不論目前是倒數或遊戲中
-    this.showStatusHUD();
+  /**
+   * 重置戰鬥場景，回到大廳狀態（供 NetworkManager 的 Leave Game 使用）
+   */
+  resetToLobby() {
+    this.gameState.phase = "waiting";
+    this.hideCountdownUI();
+    this.hideGameTimeUI();
+    this.hideStatusHUD();
 
+    const arenaGenerator = this.entity.script?.arenaGenerator;
+    if (arenaGenerator && typeof arenaGenerator.cleanup === "function") {
+      arenaGenerator.cleanup();
+    }
+
+    // 保險起見，將所有帶有 arena 相關 tag 的動態物件清除
+    const tagsToClear = ["arena", "weapon-box", "spawn-marker"];
+    tagsToClear.forEach((tag) => {
+      const ents = this.app.root.findByTag(tag) || [];
+      ents.forEach((e) => {
+        if (e && !e.destroyed) {
+          e.destroy();
+        }
+      });
+    });
+
+    if (this.network && typeof this.network.hideLeaveGameButton === "function") {
+      this.network.hideLeaveGameButton();
+    }
+  }
+
+  update(dt) {
     if (this.gameState.phase === "countdown") {
       this.updateCountdown(dt);
     } else if (this.gameState.phase === "playing") {
@@ -567,6 +629,13 @@ export class BattleGameManager extends Script {
     }
 
     el.textContent = text;
+  }
+
+  hideStatusHUD() {
+    const el = document.getElementById("battle-status-hud");
+    if (el && el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
   }
 
   showDamageEffect() {

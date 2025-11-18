@@ -76,7 +76,7 @@ class MultiPlayerClient {
     // 錯誤通知
     if (typeof game.onErrorNotify === "function") {
       game.onErrorNotify((data) => {
-        console.error("🦊 game/onErrorNotify:", data);
+        console.warn("🦊 game/onErrorNotify:", data);
         this.manager.fire("game-error", data);
       });
     }
@@ -106,16 +106,14 @@ class MultiPlayerClient {
 
     // Lobby 與遊戲房使用不同的 init 策略：
     // - Lobby（例如 "lobbyyy<appId>"）不啟用 game 模組
-    // - 真正進入遊戲房（roomId）才用 options 啟用 game 模組
+    // - 進入遊戲房（或 quick 模式的 game channel）才啟用 game 模組
     const isLobbyChannel =
       typeof roomId === "string" && roomId.startsWith("lobbyyy");
-
-    const isHost = this.manager.currentRoom?.created_by_me;
 
     if (isLobbyChannel) {
       await client.init();
       this.currentClient = client;
-    } else if (isHost) {
+    } else {
       const options = {
         modules: {
           game: {
@@ -133,10 +131,6 @@ class MultiPlayerClient {
       };
 
       await client.init(options);
-      this.currentClient = client;
-      this.addGameEventListeners();
-    } else {
-      await client.init();
       this.currentClient = client;
       this.addGameEventListeners();
     }

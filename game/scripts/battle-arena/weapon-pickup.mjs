@@ -38,7 +38,7 @@ export class WeaponPickup extends Script {
 
     // 僅本地玩家可以撿起：用 battleManager.localPlayer 的 entity 判斷，而不是 script 名稱
     const localPlayerEntity = this.battleManager.localPlayer?.entity;
-    const root = other.getRoot ? other.getRoot() : other;
+    const root = other.root || other;
     const isLocalPlayer = localPlayerEntity && (other === localPlayerEntity || root === localPlayerEntity);
     if (!isLocalPlayer) {
       return;

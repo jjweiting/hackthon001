@@ -36,6 +36,8 @@ export class NetworkUI extends pc.Script {
     if (this.networkManager) {
       // 當 Matchmaking 通知遊戲開始時，關閉配對面板並顯示戰鬥 UI
       this.networkManager.on("game-start", this.onGameStart, this);
+      // 當 NetworkManager 回到 Lobby 時，重新顯示配對面板
+      this.networkManager.on("entered-lobby", this.onEnteredLobby, this);
     }
   }
 
@@ -533,6 +535,7 @@ App ID: ${this.networkManager.appId}
   destroy() {
     if (this.networkManager) {
       this.networkManager.off("game-start", this.onGameStart, this);
+      this.networkManager.off("entered-lobby", this.onEnteredLobby, this);
     }
 
     if (this.uiContainer && this.uiContainer.parentNode) {
@@ -546,6 +549,22 @@ App ID: ${this.networkManager.appId}
   onGameStart() {
     this.hideMatchmakingUI();
     this.showBattleUI();
+  }
+
+  onEnteredLobby() {
+    // 回到 Lobby 時重新顯示 matchmaking panel 並刷新當前房間資訊
+    this.isUIVisible = true;
+    if (this.uiContainer) {
+      this.uiContainer.style.display = "block";
+    }
+    if (this.toggleButton) {
+      this.toggleButton.style.display = "block";
+      this.toggleButton.textContent = "◀";
+      this.toggleButton.style.right = "10px";
+    }
+
+    // 重新依照 NetworkManager.currentRoom 更新顯示內容
+    this.updateUI();
   }
 
   hideMatchmakingUI() {
