@@ -132,6 +132,7 @@ export class NetworkUI extends pc.Script {
     createRoomBtn.textContent = "Create Room";
     createRoomBtn.onclick = () => this.createRoom();
     actions.appendChild(createRoomBtn);
+    this.createRoomBtn = createRoomBtn;
 
     const leaveRoomBtn = document.createElement("button");
     leaveRoomBtn.className = "mm-btn mm-btn-ghost";
@@ -710,8 +711,9 @@ export class NetworkUI extends pc.Script {
     try {
       const currentRoom = this.networkManager?.currentRoom;
 
-      // 如果房間已關閉，進入大廳；否則離開房間
-      if (currentRoom && currentRoom.is_closed) {
+      // 若房間已關閉或遊戲已開始，直接進入 Lobby；否則只離開房間，留在 Lobby 狀態
+      if (currentRoom && (currentRoom.is_closed || currentRoom.is_game_started)) {
+        await this.networkManager.matchmaking.leaveRoom();
         await this.networkManager.enterLobby();
         this.showMessage("Room was closed, entered lobby!", "success");
       } else {
@@ -808,6 +810,11 @@ export class NetworkUI extends pc.Script {
 
       this.startGameBtn.disabled = !isHost;
       this.leaveRoomBtn.disabled = false;
+
+      // 已在房間中時，不能再建立新房間
+      if (this.createRoomBtn) {
+        this.createRoomBtn.disabled = true;
+      }
     } else {
       this.currentRoomInfoContent.innerHTML =
         "<div>No room joined. Create or join one.</div>";
@@ -818,6 +825,11 @@ export class NetworkUI extends pc.Script {
 
       this.startGameBtn.disabled = true;
       this.leaveRoomBtn.disabled = true;
+
+      // 不在任何房間時，才能建立新房間
+      if (this.createRoomBtn) {
+        this.createRoomBtn.disabled = false;
+      }
     }
   }
 
