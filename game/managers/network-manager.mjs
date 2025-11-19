@@ -220,36 +220,17 @@ class NetworkManager extends pc.EventHandler {
         btn.textContent = 'Leaving...';
 
         // 優先透過內部流程回到 Lobby，不重新載入頁面
-        (async () => {
-          try {
-            // 先請 BattleGameManager 清掉戰鬥場景與 UI
-            const gmEntity = this.pcApp.root.findByTag('game-manager')[0];
-            const battleManager = gmEntity?.script?.battleGameManager;
-            if (battleManager && typeof battleManager.resetToLobby === 'function') {
-              battleManager.resetToLobby();
-            }
-
-            // 離開遊戲頻道，斷開目前的 multiplayer client
-            await this.leaveChannel();
-
-            // 如果目前是 quick game 模式，改回正常模式並建立 matchmaking client
-            if (this.isQuickGameMode) {
-              this.isQuickGameMode = false;
-              await this.matchmaking.createClient();
-            }
-
-            // 進入 Lobby 頻道
-            await this.enterLobby();
-
+        this.leaveGameAndEnterLobby()
+          .then(() => {
             if (btn && btn.parentNode) {
               btn.parentNode.removeChild(btn);
             }
-          } catch (e) {
+          })
+          .catch((e) => {
             console.error('🐹 Failed to enter lobby from leave button', e);
             btn.disabled = false;
             btn.textContent = 'Leave Game';
-          }
-        })();
+          });
       };
 
       document.body.appendChild(btn);
@@ -264,6 +245,39 @@ class NetworkManager extends pc.EventHandler {
     const btn = document.getElementById('battle-leave-game-btn');
     if (btn && btn.parentNode) {
       btn.parentNode.removeChild(btn);
+    }
+  }
+
+  /**
+   * 統一的「離開當前遊戲並回到 Lobby」流程：
+   * - 通知 BattleGameManager 重置戰場與 UI
+   * - 離開目前 multiplayer channel
+   * - 若原本是 quick game 模式，恢復一般 matchmaking 並建立 client
+   * - 進入 Lobby 頻道
+   */
+  async leaveGameAndEnterLobby() {
+    try {
+      // 先請 BattleGameManager 清掉戰鬥場景與 UI
+      const gmEntity = this.pcApp.root.findByTag('game-manager')[0];
+      const battleManager = gmEntity?.script?.battleGameManager;
+      if (battleManager && typeof battleManager.resetToLobby === 'function') {
+        battleManager.resetToLobby();
+      }
+
+      // 離開遊戲頻道，斷開目前的 multiplayer client
+      await this.leaveChannel();
+
+      // 如果目前是 quick game 模式，改回正常模式並建立 matchmaking client
+      if (this.isQuickGameMode) {
+        this.isQuickGameMode = false;
+        await this.matchmaking.createClient();
+      }
+
+      // 進入 Lobby 頻道
+      await this.enterLobby();
+    } catch (e) {
+      // 讓呼叫端處理錯誤與 UI 邊界狀況
+      throw e;
     }
   }
 

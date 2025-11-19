@@ -347,6 +347,9 @@ export class BattleGameManager extends Script {
       case "team-assignment":
         this.handleTeamAssignment(payload);
         break;
+      case "back-to-lobby":
+        this.handleBackToLobbyRequest();
+        break;
       default:
         break;
     }
@@ -1247,20 +1250,24 @@ export class BattleGameManager extends Script {
     }
   }
 
+  handleBackToLobbyRequest() {
+    if (!this.network || !this.network.leaveGameAndEnterLobby) return;
+    this.network.leaveGameAndEnterLobby().catch((e) => {
+      console.error("[BattleGame] Failed to leave game and enter lobby from back-to-lobby message", e);
+    });
+  }
+
   onClickResultBackToLobby() {
     this.hideMatchResultsOverlay();
     if (!this.network) return;
 
-    // 清除戰場並回到 Lobby 頻道
-    this.resetToLobby();
+    // 先廣播 back-to-lobby 訊息，讓其他玩家也一起回到 Lobby
+    this.network.sendMessage("back-to-lobby", {});
 
-    (async () => {
-      try {
-        await this.network.enterLobby();
-      } catch (e) {
-        console.error("[BattleGame] Failed to enter lobby from result screen", e);
-      }
-    })();
+    // 再在本機執行一次離開流程（避免後端不 echo 自己的訊息）
+    setTimeout(() => {
+      this.handleBackToLobbyRequest();
+    }, 500);
   }
 
   onClickResultPlayAgain() {
