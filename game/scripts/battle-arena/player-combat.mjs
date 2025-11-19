@@ -188,7 +188,6 @@ export class PlayerCombat extends Script {
     if (avatarEntity) {
       // 首次射擊時，印出 Avatar Hierarchy，方便查名稱
       if (!this._avatarLogged) {
-        this._logAvatarHierarchy(avatarEntity);
         this._avatarLogged = true;
       }
 
@@ -214,26 +213,6 @@ export class PlayerCombat extends Script {
 
     // 再退一步用 player entity 位置
     return this.entity.getPosition().clone().add(this.rayStartOffset);
-  }
-
-  _logAvatarHierarchy(root) {
-    console.log("[PlayerCombat] Avatar root:", root.name);
-
-    const stack = [{ ent: root, depth: 0 }];
-    const maxDepth = 4;
-
-    while (stack.length > 0) {
-      const { ent, depth } = stack.pop();
-      if (depth > maxDepth) continue;
-
-      const indent = "  ".repeat(depth);
-      console.log(`[PlayerCombat] Avatar node: ${indent}${ent.name}`);
-
-      const children = ent.children || [];
-      for (let i = children.length - 1; i >= 0; i--) {
-        stack.push({ ent: children[i], depth: depth + 1 });
-      }
-    }
   }
 
   _findRightHandBone(root) {

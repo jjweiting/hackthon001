@@ -169,7 +169,7 @@ export class BattleGameManager extends Script {
       }
     });
 
-    if (this.isRoomLeader()) {
+    if (this.network?.isGameMaster?.()) {
       this.broadcastTeamAssignment();
     }
   }
@@ -230,19 +230,19 @@ export class BattleGameManager extends Script {
   enterPlayingPhase() {
     if (this._matchStarted) {
       return;
-	    }
-	    this._matchStarted = true;
-	
-	    console.log("[BattleGame][DEBUG] enterPlayingPhase");
-	
-	    this.gameState.phase = "playing";
-	    this.gameState.matchTime = 0;
+    }
+    this._matchStarted = true;
 
-	    // 確保在每一局正式開始時，房主已經產生並廣播動態場景；
-	    // 若先前已由 NetworkManager 呼叫過，_arenaGenerated 會避免重複生成。
-	    if (this.isRoomLeader() && typeof this.generateAndBroadcastDynamicArena === "function") {
-	      this.generateAndBroadcastDynamicArena();
-	    }
+    console.log("[BattleGame][DEBUG] enterPlayingPhase");
+
+    this.gameState.phase = "playing";
+    this.gameState.matchTime = 0;
+
+    // 確保在每一局正式開始時，由 game master 產生並廣播動態場景；
+    // 若先前已由 NetworkManager 呼叫過，_arenaGenerated 會避免重複生成。
+    if (this.network?.isGameMaster?.() && typeof this.generateAndBroadcastDynamicArena === "function") {
+      this.generateAndBroadcastDynamicArena();
+    }
 
     this.hideCountdownUI();
 
@@ -284,8 +284,8 @@ export class BattleGameManager extends Script {
     }
 
     if (winReason && this.network) {
-      // 只有房主向 SDK 宣告 gameEnd，其他 Client 等待 game-end 事件。
-      if (this.isRoomLeader() && this.network.multiplayer?.currentClient?.game?.gameEnd) {
+      // 只有 game master 向 SDK 宣告 gameEnd，其他 Client 等待 game-end 事件。
+      if (this.network?.isGameMaster?.() && this.network.multiplayer?.currentClient?.game?.gameEnd) {
         try {
           this.network.multiplayer.currentClient.game.gameEnd();
         } catch (e) {
@@ -497,6 +497,13 @@ export class BattleGameManager extends Script {
 
   handlePlayerKilled(message) {
     const { victimId, killerId } = message;
+    console.log("[BattleGame] handlePlayerKilled", {
+      victimId,
+      killerId,
+      killerTeam: this.getPlayerTeam(killerId),
+      isRoomLeader: this.isRoomLeader(),
+      isGameMaster: this.network?.isGameMaster?.()
+    });
 
     // 避免同一段死亡期間重複處理相同 victim/killer 的擊殺（例如網路重送）
     const now = this.app.time;
@@ -517,8 +524,9 @@ export class BattleGameManager extends Script {
 
     const killerTeam = this.getPlayerTeam(killerId);
 
-    // 只由房主負責「認定擊殺並更新比分」，再透過 score-update 廣播給所有人，確保同步
-    if (this.isRoomLeader() && killerTeam && this.network) {
+    // 任何客戶端只要知道 killerTeam，就先在本地加分；
+    // 由 game master 廣播的 score-update 會再把分數校正成一致值。
+    if (killerTeam && this.network) {
       if (killerTeam === "A") {
         this.gameState.teamA.score += 1;
         this.network.sendMessage("score-update", {
