@@ -311,63 +311,6 @@ class NetworkManager extends pc.EventHandler {
     }
   }
 
-  showGameStartButton() {
-    if (!this.multiplayer.currentClient?.game?.gameStart) {
-      console.warn('🐹 Game module not ready, cannot show Game Start button.');
-      return;
-    }
-
-    let btn = document.getElementById('battle-game-start-btn');
-    if (!btn) {
-      btn = document.createElement('button');
-      btn.id = 'battle-game-start-btn';
-      btn.textContent = 'Game Start';
-      btn.style.cssText = `
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        padding: 16px 32px;
-        font-size: 24px;
-        font-weight: bold;
-        color: #ffffff;
-        background: #0241e2;
-        border: 2px solid #ffffff;
-        border-radius: 8px;
-        cursor: pointer;
-        z-index: 1003;
-        box-shadow: 0 0 16px rgba(0, 0, 0, 0.6);
-      `;
-
-      btn.onclick = async () => {
-        btn.disabled = true;
-        btn.textContent = 'Waiting...';
-        try {
-          // 在正式 gameStart 前，先生成動態場景並廣播 map-config。
-          await this.startGameWithDynamicArena();
-          // 按鈕保留，由倒數事件決定何時關閉
-        } catch (e) {
-          console.error('🐹 Failed to call startGameWithDynamicArena:', e);
-          btn.disabled = false;
-          btn.textContent = 'Game Start';
-        }
-      };
-
-      document.body.appendChild(btn);
-    } else {
-      btn.style.display = 'block';
-      btn.disabled = false;
-      btn.textContent = 'Game Start';
-    }
-  }
-
-  hideGameStartButton() {
-    const btn = document.getElementById('battle-game-start-btn');
-    if (btn && btn.parentNode) {
-      btn.parentNode.removeChild(btn);
-    }
-  }
-
   async enterLobby() {
     // 快速遊戲模式：略過 Lobby，直接進入共用遊戲頻道
     if (this.isQuickGameMode) {
@@ -375,8 +318,6 @@ class NetworkManager extends pc.EventHandler {
       const channelId = `battle-game-${this.appId || "default"}`;
       console.log('🦊 Quick game mode, enter game channel:', channelId);
       await this.enterChannel(channelId);
-      // 直接顯示 Game Start 按鈕，讓任一玩家可觸發 gameStart
-      this.showGameStartButton();
       return;
     }
 
@@ -523,11 +464,6 @@ class NetworkManager extends pc.EventHandler {
 
   handleGameError(data) {
     console.warn('🐹 Game error:', data);
-
-    // 若玩家尚未全數準備好，保持或重新顯示 Game Start 按鈕
-    if (data?.error_type === 'player_not_all_ready') {
-      this.showGameStartButton();
-    }
   }
 
   handleWaitForPlayer(data) {
