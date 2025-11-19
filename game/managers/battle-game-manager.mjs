@@ -28,7 +28,7 @@ export class BattleGameManager extends Script {
    * @title Target Score
    * @type {number}
    */
-  targetScore = 50;
+  targetScore = 3;
 
   /**
    * @attribute
@@ -38,6 +38,13 @@ export class BattleGameManager extends Script {
   respawnTime = 5;
 
   initialize() {
+    console.log("[BattleGame][DEBUG] BattleGameManager initialize", {
+      entityName: this.entity?.name
+    });
+
+    // 一場比賽內，避免 startMatch 被重複呼叫
+    this._matchStarted = false;
+
     this.viverseApp = ViverseApp.getApplication();
     const gameManagerEntity = this.app.root.findByTag("game-manager")[0];
     this.gameManager = gameManagerEntity?.script?.gameManager;
@@ -51,9 +58,13 @@ export class BattleGameManager extends Script {
       mapSeed: null
     };
 
+    // 強制本局比賽目標分數為 3（避免 Editor 中舊有序列化數值仍為 50）
+    this.targetScore = 3;
+
     this.players = new Map();
     this.localPlayer = null;
     this._arenaGenerated = false;
+    this._respawnCountdownRemaining = null;
 
     if (this.network) {
       this.setupNetworkEvents();
@@ -76,10 +87,17 @@ export class BattleGameManager extends Script {
     this.network.off("game-countdown-end", this.onCountdownEnd, this);
     this.network.off("game-time-up", this.onGameTimeUp, this);
     this.network.off("game-end", this.onGameEnd, this);
+    this.network.off("game-restart", this.onGameRestart, this);
     this.network.off("receive-message", this.onNetworkMessage, this);
   }
 
   initializeLocalPlayer(playerEntity) {
+    console.log("[BattleGame][DEBUG] initializeLocalPlayer called", {
+      hasExistingLocalPlayer: !!this.localPlayer,
+      playerEntityName: playerEntity?.name,
+      sessionId: this.network?.sessionId
+    });
+
     this.localPlayer = {
       entity: playerEntity,
       sessionId: this.network?.sessionId ?? null,
@@ -91,6 +109,11 @@ export class BattleGameManager extends Script {
       currentWeapon: "pistol",
       isAlive: true
     };
+
+    console.log("[BattleGame][DEBUG] initializeLocalPlayer set HP", {
+      health: this.localPlayer.health,
+      maxHealth: this.localPlayer.maxHealth
+    });
 
     if (!playerEntity.script) {
       playerEntity.addComponent("script");
@@ -116,6 +139,7 @@ export class BattleGameManager extends Script {
     this.network.on("game-countdown-end", this.onCountdownEnd, this);
     this.network.on("game-time-up", this.onGameTimeUp, this);
     this.network.on("game-end", this.onGameEnd, this);
+    this.network.on("game-restart", this.onGameRestart, this);
     this.network.on("receive-message", this.onNetworkMessage, this);
   }
 
@@ -179,6 +203,11 @@ export class BattleGameManager extends Script {
   }
 
   onCountdownEnd(data) {
+    // 若比賽已經結束或不在倒數階段，忽略多餘的倒數結束事件（避免重複開新局）
+    if (this.gameState.phase === "finished" || this.gameState.phase === "playing") {
+      return;
+    }
+
     // 伺服器宣告倒數結束，此時 data.second 通常是遊戲總時間
     const playSeconds = data?.second;
     if (typeof playSeconds === "number" && playSeconds > 0) {
@@ -191,12 +220,29 @@ export class BattleGameManager extends Script {
     this.hideCountdownUI();
 
     // 倒數結束後切換到 playing 狀態，開始計時與 HUD 更新
-    this.startMatch();
+    this.enterPlayingPhase();
   }
 
-  startMatch() {
-    this.gameState.phase = "playing";
-    this.gameState.matchTime = 0;
+  /**
+   * 由倒數結束事件觸發，正式進入「playing」階段。
+   * 一場比賽內只會執行一次（由 _matchStarted 保護）。
+   */
+  enterPlayingPhase() {
+    if (this._matchStarted) {
+      return;
+	    }
+	    this._matchStarted = true;
+	
+	    console.log("[BattleGame][DEBUG] enterPlayingPhase");
+	
+	    this.gameState.phase = "playing";
+	    this.gameState.matchTime = 0;
+
+	    // 確保在每一局正式開始時，房主已經產生並廣播動態場景；
+	    // 若先前已由 NetworkManager 呼叫過，_arenaGenerated 會避免重複生成。
+	    if (this.isRoomLeader() && typeof this.generateAndBroadcastDynamicArena === "function") {
+	      this.generateAndBroadcastDynamicArena();
+	    }
 
     this.hideCountdownUI();
 
@@ -219,14 +265,36 @@ export class BattleGameManager extends Script {
     this.showGameTimeUI(remaining);
     this.showStatusHUD();
 
+    // 更新本地玩家死亡倒數 UI
+    this.updateDeathCountdown(dt);
+
+    // 更新遠端玩家死亡顯示（例如暫時隱藏被擊殺玩家）
+    this.updateRemoteDeathVisuals();
+
     if (this.gameState.matchTime >= this.matchDuration) {
       this.endMatch("time_limit");
     }
 
+    // 提前達成目標分數時，由房主呼叫 SDK 的 gameEnd()，統一結束本局遊戲。
+    let winReason = null;
     if (this.gameState.teamA.score >= this.targetScore) {
-      this.endMatch("team_a_win");
+      winReason = "team_a_win";
     } else if (this.gameState.teamB.score >= this.targetScore) {
-      this.endMatch("team_b_win");
+      winReason = "team_b_win";
+    }
+
+    if (winReason && this.network) {
+      // 只有房主向 SDK 宣告 gameEnd，其他 Client 等待 game-end 事件。
+      if (this.isRoomLeader() && this.network.multiplayer?.currentClient?.game?.gameEnd) {
+        try {
+          this.network.multiplayer.currentClient.game.gameEnd();
+        } catch (e) {
+          console.error("[BattleGame] Failed to call gameEnd()", e);
+        }
+      }
+
+      // 本地仍立即進入結束流程，避免等待網路延遲。
+      this.endMatch(winReason);
     }
   }
 
@@ -407,7 +475,8 @@ export class BattleGameManager extends Script {
     if (!this.network || !this.localPlayer) return;
     const { targetId, damage, shooterId } = message;
 
-    if (targetId === this.network.sessionId) {
+    // 僅當自己是目標且仍存活時才處理傷害，避免死亡期間重複被擊中又送出多次 player-killed
+    if (targetId === this.network.sessionId && this.localPlayer.isAlive) {
       console.log("[BattleGame] local player hit", {
         from: shooterId,
         damage,
@@ -426,16 +495,44 @@ export class BattleGameManager extends Script {
   handlePlayerKilled(message) {
     const { victimId, killerId } = message;
 
+    // 避免同一段死亡期間重複處理相同 victim/killer 的擊殺（例如網路重送）
+    const now = this.app.time;
+    const existingInfo = this.players.get(victimId);
+    if (
+      existingInfo &&
+      existingInfo.deathEndTime &&
+      existingInfo.deathEndTime > now &&
+      existingInfo.lastKillerId === killerId
+    ) {
+      return;
+    }
+
     if (this.network && this.localPlayer && killerId === this.network.sessionId) {
       this.localPlayer.kills += 1;
+      this.showLocalKillPopup(victimId);
     }
 
     const killerTeam = this.getPlayerTeam(killerId);
-    if (killerTeam === "A") {
-      this.gameState.teamA.score += 1;
-    } else if (killerTeam === "B") {
-      this.gameState.teamB.score += 1;
+
+    // 只由房主負責「認定擊殺並更新比分」，再透過 score-update 廣播給所有人，確保同步
+    if (this.isRoomLeader() && killerTeam && this.network) {
+      if (killerTeam === "A") {
+        this.gameState.teamA.score += 1;
+        this.network.sendMessage("score-update", {
+          team: "A",
+          score: this.gameState.teamA.score
+        });
+      } else if (killerTeam === "B") {
+        this.gameState.teamB.score += 1;
+        this.network.sendMessage("score-update", {
+          team: "B",
+          score: this.gameState.teamB.score
+        });
+      }
     }
+
+    // 標記該玩家在一段時間內為「死亡中」，供其他客戶端顯示
+    this.markPlayerDeath(victimId, killerId);
   }
 
   handleScoreUpdate(message) {
@@ -500,10 +597,15 @@ export class BattleGameManager extends Script {
 
   onLocalPlayerDeath(killerId) {
     if (!this.network || !this.localPlayer) return;
+    // 已經處於死亡狀態時，不要重複處理
+    if (!this.localPlayer.isAlive) return;
 
     this.localPlayer.isAlive = false;
     this.localPlayer.deaths += 1;
     this.localPlayer.health = 0;
+
+    // 設定本地玩家復活倒數秒數
+    this._respawnCountdownRemaining = this.respawnTime;
 
     this.network.sendMessage("player-killed", {
       victimId: this.network.sessionId,
@@ -525,9 +627,32 @@ export class BattleGameManager extends Script {
     this.endMatch("server_game_end");
   }
 
+  onGameRestart() {
+    // 由 SDK 通知重新開始一局：重置本地狀態與戰場，等待新的倒數與進入 playing 階段
+    this.resetToLobby();
+  }
+
   respawnPlayer(player) {
+    console.log("[BattleGame][DEBUG] respawnPlayer called", {
+      team: player?.team,
+      beforeHp: player?.health,
+      maxHealth: player?.maxHealth,
+      isAliveBefore: player?.isAlive
+    });
+
     player.health = player.maxHealth;
     player.isAlive = true;
+
+    // 若是本地玩家，復活時關閉死亡畫面與倒數
+    if (player === this.localPlayer) {
+      this._respawnCountdownRemaining = null;
+      this.hideDeathScreen();
+    }
+
+    console.log("[BattleGame][DEBUG] respawnPlayer set HP", {
+      health: player.health,
+      maxHealth: player.maxHealth
+    });
 
     const spawnPoint = this.getSpawnPoint(player.team);
     if (!spawnPoint || !player.entity) return;
@@ -540,6 +665,43 @@ export class BattleGameManager extends Script {
     // 只對「遠端玩家」進行位置重置，本地玩家交給 VIVERSE 自己處理。
     if (!isLocal) {
       player.entity.setPosition(spawnPoint);
+    }
+  }
+
+  /**
+   * 標記指定玩家在一段時間內為「死亡中」，供遠端顯示使用。
+   */
+  markPlayerDeath(sessionId, killerId) {
+    if (!sessionId || !this.network) return;
+
+    // 本地死亡邏輯由 onLocalPlayerDeath 處理，不在這裡覆寫
+    if (sessionId === this.network.sessionId) {
+      return;
+    }
+
+    const now = this.app.time;
+    const info = this.players.get(sessionId) || {};
+    info.deathEndTime = now + this.respawnTime;
+    info.lastKillerId = killerId ?? info.lastKillerId ?? null;
+    this.players.set(sessionId, info);
+  }
+
+  /**
+   * 依照 deathEndTime 暫時隱藏遠端「死亡中」的玩家，讓其他人看得出來他目前陣亡。
+   */
+  updateRemoteDeathVisuals() {
+    if (!this.network || !this.network.actorEntityMap) return;
+
+    const now = this.app.time;
+    for (const [sessionId, ent] of this.network.actorEntityMap.entries()) {
+      if (!ent || ent.destroyed) continue;
+
+      // 永遠不要在本地端隱藏自己的 Avatar，交給內部系統處理
+      if (sessionId === this.network.sessionId) continue;
+
+      const info = this.players.get(sessionId);
+      const isDead = info?.deathEndTime && info.deathEndTime > now;
+      ent.enabled = !isDead;
     }
   }
 
@@ -584,8 +746,15 @@ export class BattleGameManager extends Script {
   }
 
   endMatch(reason) {
+    // 已經處於 finished 狀態時避免重複執行（可能來自本地與 game-end 事件）
+    if (this.gameState.phase === "finished") {
+      return;
+    }
+
     this.gameState.phase = "finished";
     this._arenaGenerated = false;
+    this._matchStarted = false;
+    this._respawnCountdownRemaining = null;
     this.hideCountdownUI();
     this.hideGameTimeUI();
     this.hideStatusHUD();
@@ -595,15 +764,45 @@ export class BattleGameManager extends Script {
     this.showMatchResults(reason);
   }
 
-  /**
-   * 重置戰鬥場景，回到大廳狀態（供 NetworkManager 的 Leave Game 使用）
-   */
-  resetToLobby() {
-    this.gameState.phase = "waiting";
+	  /**
+	   * 重置戰鬥場景，回到大廳狀態（供 NetworkManager 的 Leave Game 使用）
+	   */
+	  resetToLobby() {
+	    // 保留隊伍分配，但重置本局狀態，確保下一場遊戲不會沿用舊的比分 / 時間等資料
+	    const prevTeamAPlayers = this.gameState?.teamA?.players || [];
+	    const prevTeamBPlayers = this.gameState?.teamB?.players || [];
+
+	    this.gameState = {
+	      phase: "waiting",
+	      teamA: { score: 0, players: prevTeamAPlayers },
+	      teamB: { score: 0, players: prevTeamBPlayers },
+      matchTime: 0,
+      mapSeed: null
+    };
+
     this._arenaGenerated = false;
+    this._matchStarted = false;
+    this._respawnCountdownRemaining = null;
+
+    // 清除每位玩家的暫存資訊（例如死亡時間、最後擊殺者等）
+    if (this.players) {
+      this.players.clear();
+    }
+
+	    // 重置本地玩家的戰鬥統計（但保留 team 資訊，下一局仍在同一隊）
+	    if (this.localPlayer) {
+	      this.localPlayer.health = this.localPlayer.maxHealth;
+	      this.localPlayer.isAlive = true;
+	      this.localPlayer.kills = 0;
+	      this.localPlayer.deaths = 0;
+	      this.localPlayer.currentWeapon = "pistol";
+	    }
+
     this.hideCountdownUI();
     this.hideGameTimeUI();
     this.hideStatusHUD();
+    this.hideDeathScreen();
+    this.hideMatchResultsOverlay();
 
     const arenaGenerator = this.entity.script?.arenaGenerator;
     if (arenaGenerator && typeof arenaGenerator.cleanup === "function") {
@@ -759,13 +958,329 @@ export class BattleGameManager extends Script {
   }
 
   showDeathScreen(killerId) {
-    // TODO: implement death UI
-    console.log("You were killed by", killerId);
+    const existing = document.getElementById("battle-death-overlay");
+
+    let el = existing;
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "battle-death-overlay";
+      el.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.7);
+        color: #ffffff;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        z-index: 2000;
+      `;
+
+      const title = document.createElement("div");
+      title.id = "battle-death-title";
+      title.style.cssText = `
+        font-size: 42px;
+        font-weight: 800;
+        margin-bottom: 12px;
+        text-shadow: 0 0 8px rgba(0,0,0,0.8);
+      `;
+      el.appendChild(title);
+
+      const sub = document.createElement("div");
+      sub.id = "battle-death-sub";
+      sub.style.cssText = `
+        font-size: 20px;
+        margin-bottom: 4px;
+      `;
+      el.appendChild(sub);
+
+      const countdown = document.createElement("div");
+      countdown.id = "battle-death-countdown";
+      countdown.style.cssText = `
+        font-size: 32px;
+        font-weight: 700;
+        margin-top: 8px;
+      `;
+      el.appendChild(countdown);
+
+      document.body.appendChild(el);
+    }
+
+    const titleEl = document.getElementById("battle-death-title");
+    const subEl = document.getElementById("battle-death-sub");
+
+    if (titleEl) {
+      titleEl.textContent = "YOU DIED";
+    }
+    if (subEl) {
+      subEl.textContent = killerId ? `Killed by ${killerId}` : "";
+    }
+
+    // 立即更新一次倒數數字，其後由 updateDeathCountdown 持續刷新
+    this.updateDeathCountdown(0);
+
+    el.style.display = "flex";
+  }
+
+  hideDeathScreen() {
+    const el = document.getElementById("battle-death-overlay");
+    if (el) {
+      el.style.display = "none";
+    }
+  }
+
+  updateDeathCountdown(dt) {
+    if (!this.localPlayer || this.localPlayer.isAlive) return;
+
+    if (this._respawnCountdownRemaining == null) {
+      return;
+    }
+
+    this._respawnCountdownRemaining = Math.max(
+      0,
+      this._respawnCountdownRemaining - dt
+    );
+
+    const countdownEl = document.getElementById("battle-death-countdown");
+    if (countdownEl) {
+      const secs = Math.ceil(this._respawnCountdownRemaining);
+      countdownEl.textContent = `Respawning in ${secs}s`;
+    }
+  }
+
+  /**
+   * 本地玩家成功擊殺時，在畫面上顯示簡單的「KILL」提示。
+   */
+  showLocalKillPopup(victimId) {
+    const existing = document.getElementById("battle-kill-popup");
+
+    let el = existing;
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "battle-kill-popup";
+      el.style.cssText = `
+        position: fixed;
+        top: 80px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 8px 18px;
+        border-radius: 6px;
+        color: #fff;
+        font-weight: 900;
+        font-size: 28px;
+        z-index: 2001;
+        background: rgba(220, 20, 60, 0.9);
+        border: 2px solid #ffffff;
+        text-shadow: 0 0 8px rgba(0,0,0,0.8);
+      `;
+      document.body.appendChild(el);
+    }
+
+    el.textContent = "KILL!";
+    if (victimId) {
+      el.textContent += ` (${victimId})`;
+    }
+
+    el.style.opacity = "1";
+    el.style.display = "block";
+
+    // 幾秒後自動淡出隱藏
+    setTimeout(() => {
+      const node = document.getElementById("battle-kill-popup");
+      if (node) {
+        node.style.display = "none";
+      }
+    }, 1200);
   }
 
   showMatchResults(reason) {
-    // TODO: implement match result UI
     console.log("Match ended:", reason, this.gameState);
+
+    const existing = document.getElementById("battle-result-overlay");
+
+    let el = existing;
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "battle-result-overlay";
+      el.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.8);
+        color: #ffffff;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        z-index: 2100;
+      `;
+
+      const title = document.createElement("div");
+      title.id = "battle-result-title";
+      title.style.cssText = `
+        font-size: 40px;
+        font-weight: 800;
+        margin-bottom: 8px;
+        text-shadow: 0 0 10px rgba(0,0,0,0.9);
+      `;
+      el.appendChild(title);
+
+      const sub = document.createElement("div");
+      sub.id = "battle-result-sub";
+      sub.style.cssText = `
+        font-size: 22px;
+        margin-bottom: 12px;
+      `;
+      el.appendChild(sub);
+
+      const score = document.createElement("div");
+      score.id = "battle-result-score";
+      score.style.cssText = `
+        font-size: 20px;
+        margin-bottom: 24px;
+      `;
+      el.appendChild(score);
+
+      const btnRow = document.createElement("div");
+      btnRow.style.cssText = `
+        display: flex;
+        gap: 16px;
+      `;
+
+      const btnLobby = document.createElement("button");
+      btnLobby.id = "battle-result-btn-lobby";
+      btnLobby.textContent = "Back to Lobby";
+      btnLobby.style.cssText = `
+        padding: 10px 20px;
+        font-size: 18px;
+        font-weight: 700;
+        border-radius: 6px;
+        border: 2px solid #ffffff;
+        background: #0241e2;
+        color: #ffffff;
+        cursor: pointer;
+      `;
+
+      const btnReplay = document.createElement("button");
+      btnReplay.id = "battle-result-btn-replay";
+      btnReplay.textContent = "Play Again";
+      btnReplay.style.cssText = `
+        padding: 10px 20px;
+        font-size: 18px;
+        font-weight: 700;
+        border-radius: 6px;
+        border: 2px solid #ffffff;
+        background: #00a86b;
+        color: #ffffff;
+        cursor: pointer;
+      `;
+
+      btnRow.appendChild(btnLobby);
+      btnRow.appendChild(btnReplay);
+      el.appendChild(btnRow);
+
+      document.body.appendChild(el);
+
+      const self = this;
+      btnLobby.onclick = () => {
+        self.onClickResultBackToLobby();
+      };
+      btnReplay.onclick = () => {
+        self.onClickResultPlayAgain();
+      };
+    }
+
+    const titleEl = document.getElementById("battle-result-title");
+    const subEl = document.getElementById("battle-result-sub");
+    const scoreEl = document.getElementById("battle-result-score");
+
+    const aScore = this.gameState.teamA.score;
+    const bScore = this.gameState.teamB.score;
+    const localTeam = this.localPlayer?.team ?? null;
+
+    let winTeam = null;
+    if (reason === "team_a_win") winTeam = "A";
+    if (reason === "team_b_win") winTeam = "B";
+
+    const isDraw = !winTeam || aScore === bScore;
+    const isLocalWin =
+      !!localTeam && !!winTeam && localTeam === winTeam && !isDraw;
+
+    if (titleEl) {
+      if (isDraw) {
+        titleEl.textContent = "DRAW";
+      } else {
+        titleEl.textContent = `TEAM ${winTeam} WINS`;
+      }
+    }
+
+    if (subEl) {
+      if (!localTeam) {
+        subEl.textContent = "";
+      } else if (isDraw) {
+        subEl.textContent = "Game ended in a draw.";
+      } else if (isLocalWin) {
+        subEl.textContent = "You Win!";
+      } else {
+        subEl.textContent = "You Lose.";
+      }
+    }
+
+    if (scoreEl) {
+      scoreEl.textContent = `Score  A: ${aScore}  B: ${bScore}`;
+    }
+
+    el.style.display = "flex";
+  }
+
+  hideMatchResultsOverlay() {
+    const el = document.getElementById("battle-result-overlay");
+    if (el) {
+      el.style.display = "none";
+    }
+  }
+
+  onClickResultBackToLobby() {
+    this.hideMatchResultsOverlay();
+    if (!this.network) return;
+
+    // 清除戰場並回到 Lobby 頻道
+    this.resetToLobby();
+
+    (async () => {
+      try {
+        await this.network.enterLobby();
+      } catch (e) {
+        console.error("[BattleGame] Failed to enter lobby from result screen", e);
+      }
+    })();
+  }
+
+  onClickResultPlayAgain() {
+    this.hideMatchResultsOverlay();
+    if (!this.network) return;
+
+    // 由 Host 透過 SDK 的 gameRestart() 重新啟動一局；
+    // 所有玩家會收到 game-restart / countdown 事件並在 onGameRestart 中 resetToLobby。
+    if (
+      this.isRoomLeader() &&
+      this.network.multiplayer?.currentClient?.game?.gameRestart
+    ) {
+      (async () => {
+        try {
+          await this.network.multiplayer.currentClient.game.gameRestart();
+        } catch (e) {
+          console.error("[BattleGame] Failed to call gameRestart from result screen", e);
+        }
+      })();
+    }
   }
 
   createShootEffect(position, direction, weaponType) {

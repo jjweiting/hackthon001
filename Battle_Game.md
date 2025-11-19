@@ -105,7 +105,7 @@ export class BattleGameManager extends Script {
    * @title Target Score
    * @type {number}
    */
-  targetScore = 50;
+  targetScore = 3;
 
   /**
    * @attribute
